@@ -65,6 +65,67 @@ Fiber 树（带 effect 标记 + 优先级 lanes）
 
 Fiber 同时解决这 3 件事：**链表结构 + alternate 双缓存 + flags 副作用标记**。
 
+### 1.3 澄清：Fiber 之前 Element 直接渲染到 DOM 吗？
+
+**答案：不是。从 React 0.x 到现在，Element 永远不会直接变成 DOM，中间始终有一层"协调器（Reconciler）"。** 只是这层协调器在 Fiber 之前长得不一样。
+
+#### React 渲染架构的 3 个时代
+
+| 时代 | 中间层 | 数据结构 | 是否可中断 |
+|---|---|---|---|
+| React 0.3 ~ 15 | **Stack Reconciler** | ReactInstance 树（class 实例 + ReactDOMComponent） | ❌ 不可 |
+| React 16+ | **Fiber Reconciler** | Fiber 链表树（current + workInProgress） | ✅ 可 |
+| React 18+ | + Concurrent Mode | + Lane 优先级模型 | ✅ 增强 |
+
+#### React 15 也有"虚拟 DOM"，只是没人叫它 Fiber
+
+React 15 内部对象叫 **ReactInstance**（internal instance tree），分三种：
+
+```
+ReactDOMComponent          ←→ DOM 节点（如 <div>）
+ReactCompositeComponent    ←→ 组件实例（class component）
+ReactDOMTextComponent      ←→ 文本节点
+```
+
+这棵树**就是 React 15 的"虚拟 DOM"**。它由 Element 创建出来，**长期持有在内存里**（不像 Element 是一次性快照）。
+
+#### React 15 工作流
+
+```
+JSX
+  ↓ React.createElement
+React Element 树（一次性快照）
+  ↓ Stack Reconciler 同步递归
+ReactInstance 树（长期持有）
+  ↓ mountComponent / receiveComponent
+DOM 操作指令
+  ↓ batchedUpdates 批量执行
+真实 DOM
+```
+
+为什么叫 **Stack** Reconciler：整棵树是用 **JavaScript 调用栈** 一层层递归处理的——调用栈在英文里就是 call stack。
+
+#### 三层架构对比表
+
+| 层 | React 15 | React 16+ |
+|---|---|---|
+| 第 1 层（渲染描述） | React Element | React Element |
+| 第 2 层（协调结构，长期持有） | **ReactInstance 树** | **Fiber 树**（双缓存） |
+| 第 3 层（浏览器） | 真实 DOM | 真实 DOM |
+
+**结论**：Element 从来没有"直接变成"真实 DOM。Fiber 不是"凭空多出来一层"，而是把原来的协调器**从同步递归改成可中断链表遍历**。
+
+#### 配套小测（自检）
+
+| 命题 | 对 / 错 |
+|---|---|
+| React 15 没有虚拟 DOM | ❌ 有，叫 ReactInstance 树 |
+| React 15 直接把 Element 渲染成 DOM | ❌ 中间有 Stack Reconciler |
+| Fiber 是为了引入"虚拟 DOM"才出现的 | ❌ 虚拟 DOM 早就有，Fiber 是为了"可中断" |
+| Fiber 替代了 ReactInstance 树 | ✅ 对 |
+| React 15 也能批量更新 DOM | ✅ 对（batchedUpdates 早就有） |
+| Stack Reconciler 卡顿是因为 JS 慢 | ❌ 是因为递归无法让出主线程 |
+
 ---
 
 ## 二、Stack Reconciler 为什么卡

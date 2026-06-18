@@ -41,6 +41,9 @@
 5. **我以为** alternate 是某种"备份"。
    **其实** 它是"另一棵树上的同一个我"。current 和 wIP 互为 alternate，commit 时指针一换，**没有 src/dst 之分**。
 
+6. **我以为** Fiber 之前 React Element 直接渲染到真实 DOM。
+   **其实** 从 React 0.x 开始就一直有"协调器（Reconciler）"中间层。React 15 的中间层叫 ReactInstance 树（也就是当时的"虚拟 DOM"），由 Stack Reconciler 同步递归处理。Fiber 不是"凭空多出来一层"，而是把这层中间结构**从同步递归改成可中断的链表遍历**。
+
 ---
 
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
