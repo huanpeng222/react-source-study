@@ -188,6 +188,139 @@ function performUnitOfWork(fiber) {
 
 ---
 
+## 2.5、Fiber 循环怎么"中断" + 蚂蚁爬树规则
+
+> 这一节解答 Day 2 三个高频疑问：
+> 1. JS 单线程，"中断"到底是什么意思？
+> 2. workLoop 怎么知道该让出？让出之后怎么续接？
+> 3. performUnitOfWork 内部 child/sibling/return 三指针到底怎么走？
+
+### 2.5.1 JS 的"中断"本质上是"主动 return"
+
+JS 是**单线程**的，所谓"中断"，本质就一个姿势：
+
+```js
+while (有活儿) {
+  doOneSmallThing();
+  if (该让出主线程了) {
+    return;        // ← 这就是"中断"！函数主动退出
+  }
+}
+```
+
+**JS 没法被强制打断**。你不主动 return，浏览器没办法——这就是 React 15 卡顿的根因。
+
+要"还了控制权后能继续"，需要两件事配合：
+1. **把进度存到全局变量**里（不能存在函数局部变量，return 就丢了）
+2. **再调度一次**：告诉浏览器"等你空了再回来叫我"（`MessageChannel` / `requestIdleCallback`）
+
+### 2.5.2 shouldYield 怎么判时间
+
+```js
+const FRAME_BUDGET = 5;   // 每次时间片占 5ms
+let frameDeadline = 0;
+
+function shouldYield() {
+  return performance.now() >= frameDeadline;
+}
+
+function scheduleCallback(cb) {
+  channel.port2.postMessage(null);
+  channel.port1.onmessage = () => {
+    frameDeadline = performance.now() + FRAME_BUDGET;
+    cb();
+  };
+}
+```
+
+**5ms 是 React 实际使用的时间片**。每 5ms 让出一次，浏览器有空就处理点击/动画/scroll，处理完再回来 React 接着干。
+
+⚠️ 注意：**单个 Fiber 节点的 beginWork 不可中断**。所以时间片要切到"单 Fiber"这么细的粒度。一个 Fiber 通常 < 1ms，5ms 时间片够跑 5-10 个节点。**这是 React "纤程级"调度的物理依据**。
+
+### 2.5.3 三指针 + 蚂蚁爬树规则
+
+每个 Fiber 节点身上挂三根指针：
+
+```
+return  →  父节点
+child   →  第一个孩子
+sibling →  下一个兄弟
+```
+
+**蚂蚁爬树规则**（必须背下来）：
+
+```
+站在某个节点 N 上：
+
+规则 1：先往下钻（向 child 走）
+  • N.child 存在 → 下一站是 N.child
+  • 没 child 才进规则 2
+
+规则 2：找兄弟（向 sibling 走）
+  • N.sibling 存在 → 下一站是 N.sibling
+  • 没 sibling 才进规则 3
+
+规则 3：回父亲，再找父亲的兄弟（往上 + 横移）
+  • N = N.return
+  • 回到规则 2，找 N.sibling
+  • 一直往上爬，直到找到一个有 sibling 的祖先
+  • 如果爬回到 root，整棵树走完了
+```
+
+### 2.5.4 配套示例：蚂蚁走完整棵树
+
+```
+        A
+       /│\
+      B C D
+     /|
+    E F
+```
+
+| 步 | 当前节点 | 应用规则 | 下一站 |
+|---|---|---|---|
+| 1 | A | 规则 1（有 child） | B |
+| 2 | B | 规则 1（有 child） | E |
+| 3 | E | 规则 2（有 sibling F） | F |
+| 4 | F | 规则 3：回 B → B.sibling=C | C |
+| 5 | C | 规则 2（有 sibling D） | D |
+| 6 | D | 规则 3：回 A → A 是 root | 结束 |
+
+**遍历顺序**：`A → B → E → F → C → D` —— 即**先序深度优先（DFS）**。
+
+### 2.5.5 把"中断"和"遍历"拼起来
+
+```
+[scheduler] 喊：workLoop！
+   ↓
+┌──────────────────────────────────┐
+│ while (workInProgress && !yield) │
+│   workInProgress =               │
+│       performUnitOfWork(wIP)     │ ← 每次只前进 1 个节点
+│ end                              │
+└──────────────────────────────────┘
+   ↓
+退出循环：要么干完了，要么时间到了
+   ↓
+       ├─ 干完了 → commit() 同步上 DOM
+       └─ 没干完 → scheduleCallback(workLoop)
+                  浏览器：处理点击/动画/输入...
+                  ↓ 5ms 后
+                  从 [scheduler] 那行重新开始
+```
+
+**精髓**：进度活在 `workInProgress` 这个全局变量里，下一次回来时**它还在原来那个节点上**，蚂蚁继续爬。
+
+### 2.5.6 三个常见追问
+
+| 追问 | 答案 |
+|---|---|
+| 单个组件 render 跑 50ms 会怎样？ | React 帮不了你。Fiber 可中断只保证"树太大不会卡"，保证不了"单组件慢"。这是 `React.memo` / `useMemo` 的意义 |
+| beginWork 内部不也用循环吗？为啥它不能中断？ | 它会，但每个 beginWork 通常 < 1ms，是"原子单元"。中断粒度刻意切到这个层级 |
+| completeWork 是干嘛的？ | 回溯到节点时调用。冒泡 effect 标记到父节点 `subtreeFlags` + 完成 DOM 创建/属性设置 |
+
+---
+
 ## 三、Fiber 节点的字段（看实物，不背书）
 
 > 实物来自 DevTools 抓取的 button Fiber 节点。截图见 `demos/day2/screenshots/`。
@@ -318,6 +451,213 @@ A.alternate === B   // true
 B.alternate === A   // true
 A.alternate.alternate === A   // true（自反性）
 ```
+
+#### 4.6 alternate 为什么必须双向（3 个原因）
+
+如果只有 `current.alternate → wIP`，会出 3 个问题：
+
+| 问题 | 说明 |
+|---|---|
+| **commit 后身份对换困难** | wIP 升格 current 后，原 current 想找新 current 得从 root 遍历，违背 O(1) 设计 |
+| **节点没法对象复用** | 第二次更新时 React 想复用上一次的 wIP 对象，单向时 wIP 自己不知道 current 是谁 |
+| **判断节点新旧失效** | `alternate === null` 是"我是新节点"的判据，单向时永远是 null |
+
+#### 4.7 双向 alternate 的对象复用机制（源码核心）
+
+```js
+function createWorkInProgress(current, pendingProps) {
+  let workInProgress = current.alternate;
+  if (workInProgress === null) {
+    // 第一次更新：new 一个新 Fiber
+    workInProgress = createFiber(current.tag, pendingProps, current.key);
+    workInProgress.alternate = current;
+    current.alternate = workInProgress;       // ★ 双向互指
+  } else {
+    // 第二次及以后：直接复用旧 alternate，省内存
+    workInProgress.pendingProps = pendingProps;
+    workInProgress.flags = 0;                 // 清掉上次的标记
+  }
+  return workInProgress;
+}
+```
+
+**双向 = 直接复用 = 不爆内存**。这就是 Fiber 内存可控的根本。
+
+#### 4.8 怎么判断我手里这个 fiber 是 current 还是 wIP
+
+**Fiber 节点自己没有 `isCurrent` 字段**——身份是个全局概念，不是节点属性。
+
+判别的权威源头：`FiberRoot.current`
+
+```js
+fiberRoot = {
+  current: <Fiber>,           // ← 这个字段指向当前 current 树根
+  containerInfo: <DOM>,       // 就是 document.getElementById('root')
+}
+
+function isCurrent(fiber) {
+  let node = fiber;
+  while (node.return) node = node.return;   // 爬到 HostRoot
+  const fiberRoot = node.stateNode;
+  return fiberRoot.current === node;        // 是不是 root 持有的那个？
+}
+```
+
+**实战经验规律**（不用调 isCurrent）：
+
+| 你在哪里抓到 fiber | 它是谁 |
+|---|---|
+| 函数组件函数体内 / class render() | **wIP** —— React 正在构建中 |
+| useEffect 回调里 | **current** —— commit 已结束 |
+| useLayoutEffect 回调里 | **current** —— commit 已结束但浏览器还没绘制 |
+| DevTools 控制台抓 `__reactFiber$xxx` | **current** —— 用户已看到 DOM |
+
+**所以你截图里抓到的 button fiber 是 current 树上的**，它的 alternate 是上次更新留下、等待复用的 wIP。
+
+---
+
+## 4.5、reconcile 阶段到底在干嘛
+
+> 这一节解答："reconcile 这个词出现这么多次，它到底是什么动作？"
+
+### 4.5.1 一句话定义
+
+**reconcile = 拿新的 React Element 树，去 diff 旧的 current Fiber 树，生成新的 workInProgress Fiber 树，并在每个节点打上"该干嘛"的标记。**
+
+它**不操作 DOM**，只是在做"计划"。计划做完了交给 commit 阶段去执行。
+
+### 4.5.2 生活类比：装修公司的总监
+
+业主提需求（= 新 Element）：客厅要换沙发、餐厅要加吊灯、卧室不变。
+
+装修总监量房（= reconcile）：拿新需求 vs 现状（current 树）一项一项比对——
+
+| 现状 vs 需求 | 标记 |
+|---|---|
+| 客厅沙发 A → B | 🟡 Update |
+| 餐厅原本没吊灯 → 新加 | 🟢 Placement |
+| 厨房水槽：旧有、新没了 | 🔴 Deletion |
+| 卧室完全没变 | 不标记，直接复用 |
+
+施工队（= commit）拿着这张"标记清单"动手干活，**不思考、只执行**。
+
+### 4.5.3 reconcile 的 3 个具体子任务
+
+| 子任务 | 做什么 | 在哪 |
+|---|---|---|
+| 创建/复用 Fiber | 同 type 同 key 复用旧 fiber 的 alternate；不同则新建 | `createFiberFromElement` |
+| 跑组件渲染 | 调用 `Component()` 拿到子 Element，进入下一层 | `beginWork` 内部 |
+| 打 effect 标记 | 给当前 Fiber 的 `flags` 字段写位运算标记 | `markUpdate / placeChild` |
+
+### 4.5.4 reconcile 的边界
+
+```
+reconcile 阶段（可中断、异步）
+  ├─ beginWork（向下钻）：处理当前节点，diff 子 Element 生成子 Fiber
+  ├─ completeWork（向上爬）：把当前节点的 effect 冒泡到父节点
+  └─ 整棵 wIP 树遍历完 → reconcile 结束
+      ↓
+commit 阶段（同步、不可中断）
+  └─ 按 effect 标记动手改 DOM
+```
+
+### 4.5.5 关键洞察：reconcile 可以反复打断、反复重来
+
+**只要不进 commit，就没有副作用**。用户看到的是 current 树对应的 DOM，wIP 树折腾 100 次用户都看不见。
+
+这就是 React 18 **并发渲染**的物理基础——高优先级事件（输入、点击）来了，可以直接丢弃当前 wIP，从头再来。
+
+---
+
+## 4.6、effect 标记到底在干嘛
+
+> 这一节解答："flags 这个数字是怎么影响 DOM 操作的？"
+
+### 4.6.1 一句话定义
+
+**effect 标记 = 在 Fiber 节点上贴小纸条，告诉 commit 阶段"对应的 DOM 要做什么操作"。**
+
+### 4.6.2 类比：给装修工人贴指示
+
+装修总监在每个家具上贴一张彩色便利贴：
+
+| 颜色 | 含义 | flag 名 |
+|---|---|---|
+| 🟢 绿色 | 新增 | Placement |
+| 🟡 黄色 | 改属性 | Update |
+| 🔴 红色 | 拆掉 | Deletion |
+| 🔵 蓝色 | 重绑 ref | Ref |
+| 🟣 紫色 | 跑 useEffect | Passive |
+
+工人来了之后**只看便利贴，不思考**：
+- 绿色 → `appendChild`
+- 黄色 → `setAttribute`
+- 没贴纸条的家具完全跳过
+
+### 4.6.3 为什么 effect 要在 reconcile 阶段就算好
+
+| 阶段 | 任务 | 特点 |
+|---|---|---|
+| Reconcile | 思考（决定每个节点要做什么） | 可中断、可重做、零副作用 |
+| Commit | 动手（按标记改 DOM） | 同步、一次性、不可打断 |
+
+**为什么 commit 必须同步**：如果 commit 到一半被中断，DOM 就是残缺状态——用户会看到半个组件。所以设计是：
+- **思考阶段反复来都没事**（reconcile）
+- **动手阶段一次性搞完**（commit）
+
+→ effect 必须在 reconcile 阶段**提前算好**，commit 不能再做"判断"，只能"执行"。
+
+### 4.6.4 为什么用位运算（不用字符串数组）
+
+```js
+// 假设用数组
+fiber.effects = ['Update', 'Ref', 'Passive']
+if (fiber.effects.includes('Update')) { ... }   // O(n)，慢
+
+// 位运算
+fiber.flags = Update | Ref | Passive            // 4 | 512 | 2048 = 2564
+if (fiber.flags & Update) { ... }               // O(1)，超快
+```
+
+**Fiber 树几千节点，commit 阶段每个节点都判一遍**——位运算性能差距巨大。
+
+### 4.6.5 你截图里 `flags = 4194816` 怎么解读
+
+```
+4194816 = 4194304 + 512
+        = (1 << 22) + (1 << 9)
+        = RefStatic + Ref
+```
+
+意思：**这个 button 需要绑定 ref**（你代码里 `btnRef`）。每个版本的 flag 位定义不完全一样，可以查 `react-reconciler/src/ReactFiberFlags.js`。
+
+### 4.6.6 effect 还要"冒泡"到父节点（subtreeFlags 剪枝）
+
+```js
+function completeWork(fiber) {
+  // ...
+  if (fiber.return) {
+    fiber.return.subtreeFlags |= fiber.subtreeFlags | fiber.flags;
+    //                ↑
+    //  把自己和后代的 flags 全部"冒泡"到父节点的 subtreeFlags
+  }
+}
+```
+
+**为什么冒泡**：commit 阶段如果 `node.subtreeFlags === 0`，**整棵子树直接跳过**。
+
+```
+        A (subtreeFlags = Update)  ← 有事干，进入
+       /│\
+      B  C  D (subtreeFlags = 0)   ← D 整棵跳过 ✂️
+     /|
+    E F
+       ↑ E.flags = Update（实际要干活的）
+```
+
+这就是 React 17+ 的**整棵子树剪枝**，千万级 Fiber 树 commit 只走"有事的"分支。
+
+---
 
 ### 第 5 组 · 调度（4 个字段，Day 4-5 展开）
 

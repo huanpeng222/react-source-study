@@ -44,6 +44,24 @@
 6. **我以为** Fiber 之前 React Element 直接渲染到真实 DOM。
    **其实** 从 React 0.x 开始就一直有"协调器（Reconciler）"中间层。React 15 的中间层叫 ReactInstance 树（也就是当时的"虚拟 DOM"），由 Stack Reconciler 同步递归处理。Fiber 不是"凭空多出来一层"，而是把这层中间结构**从同步递归改成可中断的链表遍历**。
 
+7. **我以为** "Fiber 可中断"是浏览器或者 React 偷偷在背后帮我们暂停了 JS 线程。
+   **其实** JS 单线程根本无法被强制中断。Fiber 的"中断"本质是**主动 `return` 退出 while 循环**：把进度写到全局变量 `workInProgress`，让出主线程，下次再通过 `scheduleCallback(workLoop)` 回来续接。**整个机制 4 个字：主动让出。**
+
+8. **我以为** reconcile 就是 diff 算法。
+   **其实** diff 只是 reconcile 的一部分。reconcile = **拿新 Element 对比旧 Fiber，生成 wIP 树，并在每个节点上打 effect 标记**——它是"装修总监量房 + 写施工清单"的过程，**完全不操作 DOM**。真正改 DOM 的是后续的 commit 阶段。
+
+9. **我以为** alternate 是单向的"备份指针"。
+   **其实** 它是**双向**的（A.alternate=B 且 B.alternate=A）。双向的根本目的是：commit 后身份对换时直接交换 root.current 指针；第二次更新时 React 直接复用旧 alternate 对象（不 new），这就是 Fiber 内存可控的根本。
+
+10. **我以为** Fiber 节点上有字段标记自己"是 current 还是 wIP"。
+    **其实** 没有这种字段——身份是**全局概念**。判别的权威源头是 `FiberRoot.current`：爬到 HostRoot，看 root.current 指针指向的是不是自己。**实战经验**：组件函数体内抓到的是 wIP，useEffect / DevTools 里抓到的是 current。
+
+11. **我以为** flags 是字符串数组或者 enum。
+    **其实** 是**位运算掩码**（`Placement | Ref | Passive` 用按位或拼起来）。用位运算是因为 commit 阶段每个 Fiber 都要判一遍 flags，O(1) 的位与运算比 `Array.includes` 快几个数量级。
+
+12. **我以为** commit 阶段会遍历整棵 wIP 树。
+    **其实** commit 用 `subtreeFlags` 剪枝——`subtreeFlags === 0` 的整棵子树直接跳过。这就是 React 17+ 千万级节点也能快速 commit 的秘诀。
+
 ---
 
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
