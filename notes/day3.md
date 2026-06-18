@@ -441,6 +441,258 @@ function placeChild(newFiber, lastPlacedIndex, newIndex) {
 
 ---
 
+## 6.5、深入：key vs type 独立判定 + Vue 3 对比
+
+> 这一节解决两个高频误区：
+> 1. 第一轮 break 的条件到底是什么（key 同 type 不同会 break 吗？）
+> 2. lastPlacedIndex 的移动规则在复杂场景里到底怎么走
+
+### 6.5.1 关键澄清：key 和 type 是两个独立判定
+
+| 状态 | 第一轮动作 | 是否 break |
+|---|---|---|
+| key 同 + type 同 | **复用 alternate**（沿用旧 Fiber 对象，更新 props） | ❌ 不 break，继续下一对 |
+| key 同 + type 不同 | **删除旧 + 新建 wIP**（不复用对象） | ❌ 不 break，继续下一对 |
+| **key 不同** | — | ✅ **break，进第二轮** |
+
+⭐ **核心区分**：
+- **key 不同** → React 觉得"对应关系乱了，整个数组顺序可能变了" → break 进第二轮 Map 算法
+- **key 同 type 不同** → React 觉得"位置还对得上，只是这个位置上的东西换了一种" → 就地销毁重建对象，**继续走第一轮**
+
+### 6.5.2 源码验证
+
+```js
+function updateSlot(returnFiber, oldFiber, newChild) {
+  const key = oldFiber !== null ? oldFiber.key : null;
+
+  // ① key 不匹配 → 返回 null，外层 break 进第二轮
+  if (oldFiber === null || newChild.key !== key) {
+    return null;
+  }
+
+  // ② key 匹配 → 进入 updateElement
+  return updateElement(returnFiber, oldFiber, newChild);
+}
+
+function updateElement(returnFiber, current, element) {
+  // ③ type 也同 → 复用对象
+  if (current !== null && current.elementType === element.type) {
+    return useFiber(current, element.props);
+  }
+
+  // ④ key 同 type 不同 → 新建（外层会顺手把旧的标 Deletion）
+  const created = createFiberFromElement(element);
+  created.return = returnFiber;
+  return created;
+}
+```
+
+源码里"复用对象"判定（`elementType === type`）和"break 第一轮"判定（key）在不同函数里，**独立**。
+
+### 6.5.3 示例 A：key 同 type 不同（不 break）
+
+```jsx
+// 旧                              // 新
+[<div key="a">A</div>,             [<p   key="a">A</p>,    ← key 同 type 变了
+ <span key="b">B</span>]            <span key="b">B</span>]
+```
+
+第一轮：
+- 步 0：div(a) → p(a)。key 同 type 不同 → **删 div + 新建 p，不 break**
+- 步 1：span(b) → span(b)。key 同 type 同 → **复用** span 的 fiber
+
+⭐ **关键**：步 0 销毁重建对象**没有打乱后面的 diff 顺序**——步 1 还能按部就班复用 span。
+
+### 6.5.4 示例 B：key 不同（break）
+
+```jsx
+// 旧                              // 新
+[<div key="a">A</div>,             [<p   key="X">X</p>,    ← key 不同
+ <span key="b">B</span>]            <span key="b">B</span>]
+```
+
+第一轮：
+- 步 0：key 不同 (a ≠ X) → **break**
+
+进第二轮，Map = `{a: div_fiber, b: span_fiber}`，从 newIdx=0 重新走 Map 算法。
+
+### 6.5.5 lastPlacedIndex 深入：完整 5 节点示例
+
+#### 设定
+
+```
+旧：A(0), B(1), C(2), D(3), E(4)
+新：[C, A, B, E, D]
+```
+
+第一轮一上来 `C.key !== A.key` → break，进第二轮。
+
+#### Map 算法逐步走
+
+`existingChildren = {A, B, C, D, E}`，初始 `lastPlacedIndex = 0`。
+
+**步 0：处理 C**
+```
+new C 复用 Map[C]，oldIndex = 2
+oldIndex(2) >= lastPlacedIndex(0)? ✅
+→ 不动，lastPlacedIndex 推到 2
+```
+
+直觉：C 之前在第 2 位，让它当"最右端柱子"。
+
+**步 1：处理 A**
+```
+new A 复用 Map[A]，oldIndex = 0
+oldIndex(0) < lastPlacedIndex(2)? ✅
+→ ⭐ Placement（移动），柱子不变
+```
+
+直觉：A 原本在 C 的左边（idx=0 < 柱子=2），现在要放到 C 后面 → 必须"跳过"C 的旧位置 → 移动。
+
+**步 2：处理 B**
+```
+new B 复用 Map[B]，oldIndex = 1
+1 < 2 → ⭐ Placement
+```
+
+**步 3：处理 E**
+```
+new E，oldIndex = 4
+4 >= 2 → 不动，柱子推到 4
+```
+
+**步 4：处理 D**
+```
+new D，oldIndex = 3
+3 < 4 → ⭐ Placement
+```
+
+#### 统计
+
+| 节点 | 移动 |
+|---|---|
+| C | ❌ |
+| A | ✅ |
+| B | ✅ |
+| E | ❌ |
+| D | ✅ |
+
+**3 次 DOM 移动**。
+
+#### 算法直觉
+
+lastPlacedIndex 像"赛跑里的最右端选手"：
+- 它**只能往右走，不能往左退**
+- 我从左到右遍历新数组：旧位置在它右边/同位 → 让它当新柱子；旧位置在它左边 → 拽过来标 Placement
+
+⭐ **贪心的本质**：React 假定"右边的不动，左边的拽过来"。可能不是最优，但 O(n)。
+
+### 6.5.6 为什么 lastPlacedIndex 初始 = 0
+
+`lastPlacedIndex` 语义是**"最后一个已放置的、不需要移动的节点的旧 index"**。
+
+- 初始时还没放置任何节点
+- 用 0 而不是 -1：因为 fiber.index 最小就是 0，用 0 作"基准哨兵"和实际值类型一致，避免源码里到处写 `lastPlacedIndex === -1 || oldIndex >= lastPlacedIndex` 这种丑陋判断
+
+效果上 0 和 -1 几乎等价（任何合法 oldIndex 都 ≥ 0），选 0 是工程美学。
+
+### 6.5.7 Vue 3 diff 对比
+
+#### 总体对比
+
+| | React | Vue 2 | Vue 3 |
+|---|---|---|---|
+| 算法 | 贪心 + lastPlacedIndex | 双端比较 | 双端 + LIS |
+| 复杂度 | O(n) | O(n) | O(n) + O(n log n) |
+| 移动次数 | 不一定最优 | 多数场景较优 | **最优** |
+
+#### Vue 3 双端比较
+
+```
+旧：[A, B, C, D, E]
+新：[A, C, B, D, E]
+
+oldStart=A ─────────────── oldEnd=E
+newStart=A ─────────────── newEnd=E
+```
+
+每轮尝试 4 种命中：
+
+| 场景 | 判断 | 动作 |
+|---|---|---|
+| 头对头 | `old[oldStart].key === new[newStart].key` | 复用，两个 Start ++ |
+| 尾对尾 | `old[oldEnd].key === new[newEnd].key` | 复用，两个 End -- |
+| 老头新尾 | `old[oldStart].key === new[newEnd].key` | 复用 + **移到末尾**，oldStart++ newEnd-- |
+| 老尾新头 | `old[oldEnd].key === new[newStart].key` | 复用 + **移到开头**，oldEnd-- newStart++ |
+
+后两种用于**快速识别整体反转**：
+
+```
+旧：[A, B, C]    新：[C, B, A]
+
+老头 A vs 新尾 A → 命中场景 3，A 移到末尾
+新 = [C, B, _]   oldStart → B
+老头 B vs 新尾 B → 命中，B 移到末尾
+...
+```
+
+#### 4 种都没命中 → 走 Map + LIS
+
+LIS = **最长递增子序列**。
+
+```
+旧：[A, B, C, D, E]   旧 idx = [0, 1, 2, 3, 4]
+新：[C, A, B, E, D]
+
+把新数组里每个节点对应的"旧 idx"列出：
+  source = [2, 0, 1, 4, 3]
+
+找最长递增子序列：
+  [2, 4] 长度 2
+  [0, 1, 4] 长度 3 ✅
+  [0, 1, 3] 长度 3 ✅
+
+选 [0, 1, 4]（对应 A, B, E）—— 这 3 个保持相对顺序不动
+移动剩下的：C, D —— 共 2 次移动
+```
+
+#### 同一场景对比
+
+```
+旧：[A, B, C, D, E]
+新：[C, A, B, E, D]
+
+React 贪心：3 次移动（A, B, D）
+Vue 3 LIS： 2 次移动（C, D）
+
+差 1 次
+```
+
+#### React 团队的解释
+
+> "We have evaluated LIS-based algorithms and find that the marginal performance improvement does not justify the implementation complexity."
+
+**取舍**：源码复杂度 +30%，性能 +0.5%。React 选源码简单。
+
+### 6.5.8 决策树速查
+
+```
+新旧 key 同？
+  ├─ 否 → break，进第二轮（Map 算法）
+  └─ 是 → 新旧 type 同？
+           ├─ 是 → 复用 alternate（O(1)）
+           └─ 否 → 删旧 + 新建（但不 break）
+
+第二轮 placeChild：
+  复用旧 fiber？
+    ├─ 是 → oldIndex >= lastPlacedIndex？
+    │        ├─ 是 → 不移动，lastPlacedIndex = oldIndex
+    │        └─ 否 → 标 Placement，lastPlacedIndex 不变
+    └─ 否（新建）→ 标 Placement
+```
+
+---
+
 ## 七、实战演练：`[A,B,C,D] → [B,A,D,C]`
 
 旧链表：`A(idx=0) → B(idx=1) → C(idx=2) → D(idx=3)`
