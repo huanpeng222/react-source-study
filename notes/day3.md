@@ -693,6 +693,142 @@ Vue 3 LIS： 2 次移动（C, D）
 
 ---
 
+## 6.6、"复用"的边界 + DOM 移动会触发 useEffect 重跑
+
+> 这一节澄清两个跟练实验暴露的盲点：
+> 1. type 同 = 一定复用？**不对**——必须"同位置 + type 同"
+> 2. Fiber 复用 = useEffect 不跑？**不对**——DOM 移动会触发 effect 重跑
+
+### 6.6.1 复用的严格条件：同位置 + type 同
+
+假设 1 的准确表述应该是：
+
+> **同一位置的 Fiber，如果 type 变了，整棵子树丢弃 + 重建。**
+
+⭐ **注意 "同一位置" 这 4 个字**。React 按位置判断，不会"深入到子树里找同 type 的复用对象"。
+
+### 6.6.2 反直觉案例：input 内容会重置
+
+```jsx
+{wrapper === 'div' 
+  ? <div><input defaultValue="hello" /></div>
+  : <span><input defaultValue="hello" /></span>
+}
+```
+
+直觉上你会想："input 还是 input，type 没变，应该复用啊。"
+
+**错。** React 看到的是：
+
+```
+旧：div(位置0) > input(位置0.0)
+新：span(位置0) > input(位置0.0)
+```
+
+第 0 层位置 0：div → span，type 变了 → **整棵子树重建**（包括内部 input）→ DOM 是新的 → 用户输入丢失。
+
+**对比实验**（type 同，只 className 变）：
+
+```jsx
+<div><input /></div> ↔ <div className="x"><input /></div>
+```
+
+div type 同 → input 不重建 → 用户输入保留 ✅
+
+### 6.6.3 为什么 React 这么"粗暴"地判定子树重建
+
+工程效率来源：**判断在最浅一层就完成，不深入**。
+
+如果 React 要"递归进去看 input 是不是同一个"：
+- 复杂度从 O(n) 退化
+- 还要回答"`<div>` 的 attribute 怎么迁移到 `<span>`"等一堆边界规则
+- 用户更难预期"我的 input 到底会不会保留"
+
+**取舍**：粗暴判定 → 简单 + 行为可预测。这是 React"够用就好"哲学的体现。
+
+### 6.6.4 DOM 移动触发 useEffect 重跑（Day 3 实验 D2 揭示）
+
+`[A, B, C, D]` → `[B, A, D, C]`，被标 Placement 的节点（A、C）的 useEffect：
+
+```
+[A] UNMOUNT   ← effect cleanup
+[A] MOUNT     ← effect 重跑
+[C] UNMOUNT
+[C] MOUNT
+```
+
+B、D 没被标 Placement → DOM 没动 → useEffect 不重跑。
+
+#### 为什么会 unmount + mount？
+
+Placement 在 commit 阶段执行 `parent.insertBefore(node, anchor)`：
+
+> 浏览器原生 API 行为：**已存在的 node 被 insertBefore 时，先 detach 再 attach**。
+
+React 的 effect 系统在这个过程里观察到：
+- detach 时 → useEffect 清理函数被调用
+- attach 后 → useEffect 重新跑
+
+⭐ **核心洞察**：
+
+> **Fiber 对象是复用的（同一个引用），但 DOM 节点的"移动"被 React 解释为"重新挂载"，触发 useEffect cleanup + rerun。**
+
+#### 怎么验证 Fiber 真的没重建
+
+```jsx
+function Item({ id, name }) {
+  // Fiber 第一次创建时记下随机编号
+  const personalId = useRef(Math.random().toString(36).slice(2, 6));
+
+  useEffect(() => {
+    console.log(`[${id}-${name}] MOUNT (Fiber编号=${personalId.current})`);
+    return () => console.log(`[${id}-${name}] UNMOUNT (Fiber编号=${personalId.current})`);
+  }, []);
+
+  return <li>{id} - {name}</li>;
+}
+```
+
+shuffle 后 A 的 UNMOUNT + MOUNT 打印的 `personalId.current` **仍然是初始值**——说明 useRef 没重新初始化 → Fiber 对象没被销毁重建。
+
+### 6.6.5 抽屉模型（核心心智模型）
+
+```
+React Fiber = 一个抽屉
+  ├─ props（每次 render 重新塞进来 → "标签"换得快）
+  ├─ state（抽屉里的玩具 → 跟抽屉走）
+  ├─ ref（抽屉里的便条 → 跟抽屉走）
+  └─ DOM 引用（抽屉对应的实物 → 跟抽屉走）
+
+key 决定的事：哪个抽屉对应哪个语义身份
+  - key=id：抽屉跟着身份走（A 永远是同一个抽屉，搬家也搬着抽屉走）
+  - key=index：抽屉钉死在位置，身份是贴在抽屉外的标签，可以换贴
+                ↑ 这就是错乱的根源
+```
+
+**`console.log(id, name)`** 看的是**贴在抽屉外的标签** —— 当然对得上。
+**错乱发生在抽屉里的东西**（state、ref、input.value、focus、scroll、动画进度）。
+
+### 6.6.6 key=index 出 bug 的根本前提
+
+⭐ "key=index 出 bug" 必须依赖 **"index 与语义身份的对应关系发生了改变"**：
+- 数组顺序变了（重排）
+- 数组长度变了（增删）
+
+如果能保证"index 永远对应同一个语义实体"（只更新、不增不删不重排），key=index 没问题。
+
+**但这种保证非常脆弱**——今天保证不重排，下次迭代加排序就崩了。
+
+**最佳实践**：永远用 id，永远不要赌。
+
+### 6.6.7 useEffect 依赖数组能阻止移动触发的 rerun 吗
+
+**不能**。useEffect 在 commit 阶段被 React 强制 cleanup（无论依赖变没变），DOM 移动后再重新跑 effect。这个行为**和依赖数组无关**。
+
+如果不想让移动触发 effect 重跑，唯一办法：**不要移动**（即不重排列表，或在只读场景用 key=index）。
+
+---
+
 ## 七、实战演练：`[A,B,C,D] → [B,A,D,C]`
 
 旧链表：`A(idx=0) → B(idx=1) → C(idx=2) → D(idx=3)`

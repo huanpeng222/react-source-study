@@ -76,24 +76,30 @@ export default function App() {
 
 ### 目标
 
-亲眼看到 React 在不同 key 策略下到底**销毁/复用了哪些节点**。
+亲眼看到 React 在不同 key 策略下到底**销毁/复用/移动了哪些节点**。
+**⚠️ 重要观察**：DOM 移动会触发 useEffect cleanup + rerun（即使 Fiber 是复用的）。
 
 ### 代码
 
 ```jsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 function Item({ id, name }) {
+  // ★ 用 useRef 记录这个 Fiber 第一次创建时的"个人编号"
+  // 如果 personalId 变了 → 说明 Fiber 真的重建了
+  // 如果 personalId 没变但 MOUNT/UNMOUNT 触发了 → 说明只是 DOM 移动
+  const personalId = useRef(Math.random().toString(36).slice(2, 6));
+
   useEffect(() => {
-    console.log(`%c[${id}-${name}] MOUNT`, 'color:green;font-weight:bold');
-    return () => console.log(`%c[${id}-${name}] UNMOUNT`, 'color:red;font-weight:bold');
+    console.log(`%c[${id}-${name}] MOUNT (Fiber编号=${personalId.current})`, 'color:green;font-weight:bold');
+    return () => console.log(`%c[${id}-${name}] UNMOUNT (Fiber编号=${personalId.current})`, 'color:red;font-weight:bold');
   }, []);
-  
+
   useEffect(() => {
-    console.log(`[${id}-${name}] UPDATE`);
+    console.log(`[${id}-${name}] UPDATE (Fiber编号=${personalId.current})`);
   });
 
-  return <li>{id} - {name}</li>;
+  return <li>{id} - {name} (Fiber: {personalId.current})</li>;
 }
 
 export default function App() {
@@ -133,43 +139,75 @@ export default function App() {
 
 ### 操作步骤
 
-1. 启动应用，**清空 console**
-2. 点击 `shuffle` 按钮
-3. 观察 console
+1. 启动应用，**记下两个列表里每个 Item 的 Fiber 编号**（页面上显示）
+2. **清空 console**
+3. 点击 `shuffle` 按钮
+4. 观察 console + 页面上的 Fiber 编号
 
-### 预期现象
+### 真实预期现象（修正版）
 
 **上面那个 ul（key=id）**：
+
 ```
-[A-apple] UPDATE
 [B-banana] UPDATE
-[C-cherry] UPDATE
+[A-apple] UPDATE
 [D-durian] UPDATE
-（没有 MOUNT/UNMOUNT，全部复用，只是位置移动）
+[C-cherry] UPDATE
+[A-apple] UNMOUNT   ← ⚠️ DOM 移动触发
+[A-apple] MOUNT     ← ⚠️ DOM 移动触发（但 personalId 不变，说明 Fiber 没重建）
+[A-apple] UPDATE
+[C-cherry] UNMOUNT  ← ⚠️ 同上
+[C-cherry] MOUNT
+[C-cherry] UPDATE
 ```
 
+→ A 和 C 的 Fiber 编号在 shuffle 前后**不变**（验证 Fiber 复用），但 useEffect 触发了 cleanup + rerun。
+→ B 和 D 没标 Placement（不需要移动），只 UPDATE。
+
 **下面那个 ul（key=index）**：
+
 ```
-[A-apple] UPDATE        ← 内容变成 B-banana，但 Item 没重建
-[B-banana] UPDATE       ← 内容变成 A-apple
-[C-cherry] UPDATE       ← 内容变成 D-durian
-[D-durian] UPDATE       ← 内容变成 C-cherry
-（也没有 MOUNT/UNMOUNT，但每个 Item 的"身份"已经错乱）
+[B-banana] UPDATE
+[A-apple] UPDATE
+[D-durian] UPDATE
+[C-cherry] UPDATE
 ```
+
+→ 4 行 UPDATE，**没有 mount/unmount**。
+→ Fiber 编号也"看起来没变"（实际上是位置 0 的 Fiber 一直被复用，只是 id/name props 换了人）。
+
+### ⚠️ 关键思考题（必答）
+
+**Q**：key=index 的 console 没 mount/unmount，看起来"很安静"，那它的 bug 究竟在哪？
+
+<details><summary>答案</summary>
+
+console.log 打印的是从 **props 读取**的 id/name，每次 render 都用最新 props，所以"看起来对得上"。
+
+**Bug 在 Fiber 内部不可见的部分**：
+- useState 内部 state
+- useRef 持有的引用（如这个例子里的 personalId）
+- 非受控 DOM 内部 value（input.value、scroll position、focus、动画）
+
+要让 bug 可见，需要给 Item 加 useState 或非受控 input，比如 D1 实验那种 `defaultValue` 写法。
+
+**口诀**：抽屉跟着身份走 vs 钉死在位置。console.log 看的是抽屉外的标签 → 对得上；state/ref/DOM 内部状态在抽屉里 → 跟着抽屉走 → 错位。
+
+</details>
 
 ### 进阶：刻意制造 type 不同
 
-把第三个 Item 改成 `<p>`，看会不会 unmount：
+把第三个 Item 改成 `<p>`，看会不会真正销毁重建：
 
 ```jsx
 {items.map(item => 
   item.id === 'C' 
-    ? <p key={item.id}>cherry-p</p>      // 改成 p
+    ? <p key={item.id}>cherry-p</p>
     : <Item key={item.id} id={item.id} name={item.name} />
 )}
 ```
 
-shuffle 后预期：因为 type 改变了（li → p），会触发 UNMOUNT + MOUNT。
+shuffle 后预期：C 的 type 改变（li → p）触发**真正的 Fiber 销毁重建**（personalId 会变）。
 
 ### 留档
 

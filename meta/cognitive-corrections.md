@@ -96,6 +96,15 @@
 22. **我以为** lastPlacedIndex 初始应该是 -1（"还没开始放节点"）。
     **其实** 初始 = 0。fiber.index 最小就是 0，用 0 作为"基准哨兵"和实际值类型一致，避免源码里到处写 `=== -1` 判空。效果上 0 和 -1 在算法行为上几乎等价（任何 oldIndex ≥ 0），选 0 是工程美学。
 
+23. **我以为** 只要 type 没变就一定复用（input type 还是 input，就不会重建）。
+    **其实** 假设 1 准确说法是 **"同位置 + type 同"才复用**。React 按位置判断，一旦祖先 type 变（如 `<div>` → `<span>`），**整棵子树连同内部 input 一起销毁重建**，React 不会"递归进去看 input 是不是同一个"。这是 React 工程效率的来源：判断在最浅一层完成。
+
+24. **我以为** Fiber 复用 = useEffect 不会触发。
+    **其实** **Fiber 对象是复用的（引用没变），但 DOM 节点的"移动"被 React 解释为"重新挂载"**，触发 useEffect cleanup + rerun。原因：Placement 在 commit 阶段执行 `insertBefore`，浏览器把已存在的 DOM 先 detach 再 attach。这个行为**和依赖数组无关**——即使 useEffect 写 `[id]`，DOM 移动也会触发 cleanup + rerun。**Fiber 复用 ≠ DOM 不动 ≠ useEffect 不跑**，三件事独立。
+
+25. **我以为** key=index 在"列表只更新不增删不重排"场景下也会出 bug。
+    **其实** 这种场景下 i 和 id 本质上一一对应，**key=index 没问题**。出 bug 的根本前提是 **"index 与语义身份的对应关系发生了改变"**——要么重排，要么增删。但这种保证非常脆弱（迭代加排序就崩），所以最佳实践**永远用 id，永远不要赌**。
+
 ---
 
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
