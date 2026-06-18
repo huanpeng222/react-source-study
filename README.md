@@ -10,7 +10,7 @@
 |---|---|---|---|
 | W1 | D1 | JSX → React Element | ✅ |
 | W1 | D2 | Element → Fiber + 双缓存 | ✅ |
-| W1 | D3 | Reconcile diff 算法 | ⏳ |
+| W1 | D3 | Reconcile diff 算法 | ✅ |
 | W1 | D4 | beginWork / completeWork | ⏳ |
 | W1 | D5 | commit 阶段 | ⏳ |
 
@@ -18,16 +18,16 @@
 
 ---
 
-## 📂 目录约定
+## 📂 每日 4 件套（强制）
 
 ```
-notes/dayN.md            主笔记（教案 + 知识点）
-notes/dayN-quiz.md       自测题（答案折叠）
-demos/dayN/              当天可跑代码 + 实验
-meta/roadmap.md          总学习路线
-meta/cognitive-corrections.md  累计认知纠正
-STUDY_PROTOCOL.md        AI 协作契约（跨电脑接力规则）
+notes/dayN.md              完整教程（长，跟练前/中输出）
+demos/dayN/                可跑代码 + observations.md + 截图
+notes/dayN-summary.md      精简笔记（含跟练疑问 + 踩坑，学完后输出）
+notes/dayN-quiz.md         自测题（答案折叠，学完后输出）
 ```
+
+> ⭐ `dayN.md` 是教程，`dayN-summary.md` 是速查卡。详见 STUDY_PROTOCOL §2。
 
 ---
 
