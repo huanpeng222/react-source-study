@@ -107,4 +107,29 @@
 
 ---
 
+## Day 4 · beginWork / completeWork 工作循环
+
+26. **我以为** DOM 节点是在 commit 阶段创建的。
+    **其实** DOM 节点（detached、不在 document 里）在 **completeWork 阶段就创建好了**。commit 阶段只负责把整棵 detached DOM 树 appendChild 到真实文档。装修类比：beginWork = 设计图纸，completeWork = 工厂预制家具，commit = 一口气搬进新家。
+
+27. **我以为** beginWork 处理所有 Fiber 类型用同一套逻辑。
+    **其实** 是按 `fiber.tag` 分发到 30+ 种 case：函数组件走 renderWithHooks（跑函数）；类组件复用 instance 调 render()；DOM 节点不跑函数直接取 props.children。三者完全不同。
+
+28. **我以为** bailout 就是"跳过整棵子树"。
+    **其实** bailout 只跳过**当前 Fiber 自身的渲染**。子 Fiber 是否跳过看 `childLanes`：`childLanes = 0` → 整棵子树彻底跳过；`childLanes` 命中 → 当前 bailout，子继续走。这就是为什么"父 memo 了，子还能渲染"。
+
+29. **我以为** Hook 链表是某种全局变量。
+    **其实** Hook 链表挂在**每个函数组件 Fiber 的 `memoizedState` 字段**上，按调用顺序建立。这就是"Hook 不能放 if/for 里"的根本原因——React 完全按调用顺序对应链表节点，顺序错了拿到的就是错位的 Hook。
+
+30. **我以为** completeWork 主要是"清理工作"。
+    **其实** completeWork 干两件极重要的事：① HostComponent 创建 detached DOM、HostText 创建 textNode；② 冒泡子节点 flags 到父节点 subtreeFlags（位运算合并）。**冒泡的唯一目的：让 commit 阶段沿着"有事干的路径"前进，整棵子树剪枝**——把 commit 复杂度从 O(n) 降到 O(深度) ≈ O(log n)。
+
+31. **我以为** flags 和 subtreeFlags 都是 completeWork 时打的。
+    **其实** **flags 在 beginWork 阶段（reconcileChildren 内部）打**，**subtreeFlags 在 completeWork 阶段冒泡得到**。口诀：**flags 在 beginWork 打，subtreeFlags 在 completeWork 冒。**
+
+32. **我以为** 跟练饱和时硬学就行。
+    **其实** 饱和 = 大脑短期记忆已满，硬塞 = 死记硬背。**正确做法：暂停 + 默写 + 短暂离线**。Day 4 跟练 19:30 饱和时选了"睡前默写主管道图"，22:43 默写出来时之前散点知识自动串通——证明 **"默写 > 重读"是源码学习方法论的灵魂**。
+
+---
+
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
