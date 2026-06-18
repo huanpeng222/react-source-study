@@ -62,6 +62,12 @@
 12. **我以为** commit 阶段会遍历整棵 wIP 树。
     **其实** commit 用 `subtreeFlags` 剪枝——`subtreeFlags === 0` 的整棵子树直接跳过。这就是 React 17+ 千万级节点也能快速 commit 的秘诀。
 
+13. **我以为** commit 之后旧 current 会被销毁、新 wIP 是在旧 current 上"重建"出来的。
+    **其实** 同一个组件位置永远只有 **2 个 Fiber 对象在轮流坐庄**。commit 只是切换 `root.current` 指针，旧 current 原地不动；下次 setState 时 React 通过 `current.alternate` 拿到旧 current 直接**复用为新 wIP**（改写 pendingProps / 清零 flags），不 new 新对象。**对象不死，身份对换**。Fiber 真销毁只发生在：组件卸载、`root.unmount()`、diff 时类型变化（如 `<div>` → `<span>`）。
+
+14. **我以为** wIP 和 current 是两棵完整树。
+    **其实** 是两条"路径"。没变化的子树（bailout）wIP 直接**共享 current 的子树引用**，不会建对应 alternate。这就是 `React.memo` 的物理实现，也是 Fiber 内存远小于"双倍树"的根本原因。
+
 ---
 
 <!-- 后续 Day 的认知纠正继续追加在这里 -->

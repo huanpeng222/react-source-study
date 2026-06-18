@@ -514,6 +514,169 @@ function isCurrent(fiber) {
 
 **所以你截图里抓到的 button fiber 是 current 树上的**，它的 alternate 是上次更新留下、等待复用的 wIP。
 
+#### 4.9 旧 current 不会销毁，新 wIP 是复用不是重建（重点澄清）
+
+> 这一小节回答两个高频误解：
+> 1. 旧 current 在 commit 后会被销毁吗？
+> 2. 新 wIP 是在旧 current 上"重建"出来的吗？
+
+**核心一句话**：
+
+> Fiber 整个生命周期里，**同一个组件位置永远只有 2 个 Fiber 对象在轮流坐庄**，不会持续创建/销毁。
+
+##### 4 帧动画拆解（盯着 button 这一个节点看）
+
+**帧 1：首次 mount**
+
+```
+root.current = Fiber_A         对象数：1
+Fiber_A.alternate = null       （wIP 还没出现）
+Fiber_A ←─ 用户看到的 DOM
+```
+
+**帧 2：第一次 setState（reconcile 阶段）**
+
+```
+root.current = Fiber_A         对象数：2（new Fiber_B）
+Fiber_A.alternate = Fiber_B
+Fiber_B.alternate = Fiber_A
+
+Fiber_A ←─ 用户仍看到的（current）
+Fiber_B ←─ React 正在改的（wIP）
+```
+
+**帧 3：第一次 commit 完成（身份对换）**
+
+```
+root.current = Fiber_B  ★ 指针变了！   对象数：仍是 2
+Fiber_A.alternate = Fiber_B
+Fiber_B.alternate = Fiber_A
+
+Fiber_B ←─ 用户现在看到的（新 current）
+Fiber_A ←─ 旧 current，现在是"下次 wIP 候选"
+```
+
+⭐ 关键变化：**只动了一个指针**（`root.current` 从 A 改指到 B）。Fiber_A 没动、没销毁，字段还是上次的 props/state。
+
+**帧 4：第二次 setState（复用旧 current 当 wIP）**
+
+```js
+function createWorkInProgress(current, pendingProps) {
+  let workInProgress = current.alternate;  // ← 这里！
+  if (workInProgress === null) {
+    // 第一次更新走这里：new 新对象
+    workInProgress = createFiber(...);
+    workInProgress.alternate = current;
+    current.alternate = workInProgress;
+  } else {
+    // 第二次及以后走这里：直接复用！
+    workInProgress.pendingProps = pendingProps;
+    workInProgress.flags = 0;          // 清掉上次的 effect 标记
+    workInProgress.subtreeFlags = 0;
+    workInProgress.deletions = null;
+  }
+  return workInProgress;
+}
+```
+
+第二次 setState 时：
+
+```
+root.current = Fiber_B（用户看的）       对象数：仍是 2
+Fiber_A 被改写：
+  - pendingProps ← 新 props
+  - flags = 0
+  - 准备接受 reconcile 在它身上打新标记
+Fiber_A 现在是新的 wIP！
+```
+
+**Fiber_A 没有"重建"**，只是字段被改写了。对象引用、对象身份完全没变。
+
+##### 整个循环示意
+
+```
+mount:
+   只有 Fiber_A      (current)
+                  ↓ setState
+update 1:
+   new Fiber_B      Fiber_A (current) ←─alt─→ Fiber_B (wIP)
+                  ↓ commit
+                  ↓ root.current = B
+   身份对换：       Fiber_A (旧 current → 下次 wIP)  Fiber_B (新 current)
+                  ↓ setState
+update 2:
+   不 new！复用 A   Fiber_B (current) ←─alt─→ Fiber_A (wIP)
+                  ↓ commit
+                  ↓ root.current = A
+   再次对换：       Fiber_A (新 current)  Fiber_B (旧 current → 下次 wIP)
+                  ↓ setState
+update 3:
+   不 new！复用 B   Fiber_A (current) ←─alt─→ Fiber_B (wIP)
+                  ↓ ...
+
+⭐ 整个过程，每个组件位置永远只有 2 个 Fiber 对象在轮换使用
+⭐ 没有"销毁"，没有"重建"，只有指针交换 + 字段改写
+```
+
+##### Fiber 真的会销毁的 3 种情况
+
+| 场景 | 触发条件 |
+|---|---|
+| 组件卸载 | 整棵子树从 JSX 中移除（条件渲染、列表删除），对应 Fiber 不再被引用 |
+| 整个应用 unmount | `root.unmount()` 调用 |
+| diff 时类型变化 | `<div>` 改 `<span>`，旧 Fiber 标记 Deletion，新 Fiber 是新对象 |
+
+⚠️ "组件一直存在、只是 setState 更新"的场景下，**Fiber 永远不会销毁**。
+
+##### 关键澄清：其实不是"两棵完整树"
+
+```
+current 树           wIP 树
+   A                    A'   (A.alternate = A')
+   ├ B                  ├ B'
+   │  ├ C               │  ├ C ←── 没变化的子节点直接共享
+   │  └ D               │  └ D ←── 没变化的子节点直接共享
+   └ E                  └ E'  (变了，走 alternate)
+```
+
+**严格说，wIP 和 current 是两条"路径"，不是两棵"完整树"**：
+- 有变化的节点：wIP 上有对应的 alternate 节点
+- 没变化的节点（bailout）：wIP 直接**共享 current 的子树引用**
+
+这就是为什么 React 内存远小于"双倍 Fiber 树"——也是 `React.memo` 性能优化的物理实现。
+
+##### 速查表
+
+| 阶段 | Fiber_A | Fiber_B | root.current |
+|---|---|---|---|
+| 首次 mount | new，是 current | 不存在 | → A |
+| 首次 setState reconcile | current（用户看） | new，是 wIP | → A |
+| 首次 commit | 旧 current（保留） | 新 current（用户看） | → B（指针变） |
+| 第二次 setState reconcile | **复用为 wIP**（字段改写） | 仍是 current | → B |
+| 第二次 commit | 新 current（用户看） | 旧 current（保留） | → A（指针又变） |
+| 第三次 setState reconcile | 仍是 current | **复用为 wIP**（字段改写） | → A |
+
+**精髓**：A 和 B 这两个对象**轮流坐庄**，每次 commit 切换 `root.current` 指针。**对象不死，身份对换**。
+
+##### 动手验证（30 秒跑出来）
+
+```js
+useEffect(() => {
+  if (!btnRef.current) return;
+  const fiberKey = Object.keys(btnRef.current).find(k => k.startsWith('__reactFiber$'));
+  const fiber = btnRef.current[fiberKey];
+
+  if (window.__lastFibers) {
+    const [lastCurrent, lastAlternate] = window.__lastFibers;
+    console.log('本次 current === 上次 alternate ?', fiber === lastAlternate);
+    console.log('本次 alternate === 上次 current ?', fiber.alternate === lastCurrent);
+  }
+  window.__lastFibers = [fiber, fiber.alternate];
+}, [count]);
+```
+
+**预期**：从第 2 次点击开始，两个判断**都是 true** —— 证明对象引用没新建，只是身份对换。
+
 ---
 
 ## 4.5、reconcile 阶段到底在干嘛
