@@ -306,6 +306,199 @@ function commitMutationEffects(root, finishedWork) {
 
 ⭐ Day 3 §6.6 "DOM 移动触发 useEffect 重跑"就是在这一步——`insertBefore` 把已存在 DOM 先 detach 再 attach，触发 useEffect cleanup + rerun。
 
+### 4.2.5 关键澄清：Mutation 跑的 cleanup ≠ flushPassiveEffects 跑的 effect
+
+> 这是 Day 5 最容易混的一个点——两个"跑 useEffect"跑的根本不是同一个东西。
+
+```jsx
+useEffect(() => {
+  console.log('effect 跑');       // ★ flushPassiveEffects 异步跑（这次新建的）
+  return () => {
+    console.log('cleanup 跑');    // ★ 下次 Mutation 同步跑（上次留下的）
+  };
+}, [dep]);
+```
+
+#### 两次 render 时间线
+
+dep 从 0 → 1 → 2，连续 3 次 render：
+
+```
+首次渲染（dep=0）
+   ↓
+[commit 1]
+   Phase 1: 调度 useEffect 第 1 次的回调
+   Phase 2 Mutation:（没有旧 cleanup，第一次 mount）
+   Phase 3 Layout
+   ↓
+[浏览器 paint]
+   ↓
+[异步 flushPassiveEffects 1]
+   - 跑 effect_1: 'effect 跑' (dep=0)
+   - effect_1 返回 cleanup_1
+   - React 把 cleanup_1 挂在 hook 上存起来
+
+────── setDep(1) ──────
+
+第 2 次渲染（dep=1）
+   ↓
+[commit 2]
+   Phase 1: 调度 useEffect 第 2 次回调
+   Phase 2 Mutation:
+     ★ 跑上次留下的 cleanup_1: 'cleanup 跑' (dep=0 闭包) ★
+   Phase 3 Layout
+   ↓
+[浏览器 paint]
+   ↓
+[异步 flushPassiveEffects 2]
+   - 跑 effect_2: 'effect 跑' (dep=1)
+   - 返回 cleanup_2 存起来
+```
+
+#### 实际 console 输出（操作：点击按钮 2 次）
+
+```
+首次渲染（dep=0）：
+  effect: 0     ← flushPassiveEffects 跑的
+
+点击 1 次（dep=1）：
+  cleanup: 0    ← Mutation 阶段跑的（上次留下的，dep 是闭包捕获的旧值）
+  effect: 1     ← flushPassiveEffects 跑的（本次新值）
+
+点击 2 次（dep=2）：
+  cleanup: 1
+  effect: 2
+```
+
+#### 对比表（必背）
+
+| | Mutation 跑的 cleanup | flushPassiveEffects 跑的 effect |
+|---|---|---|
+| 跑的内容 | 上次 effect 返回的函数 | 这次 render 新建的回调 |
+| 同步 or 异步 | **同步**（commit 阶段内） | **异步**（commit 后宏任务） |
+| 阻塞 paint 吗 | ✅ 是（commit 整体阻塞） | ❌ 否 |
+| dep 是哪一版 | 上次 render 的（闭包） | 这次 render 的 |
+
+#### 为什么 cleanup 必须同步
+
+```js
+useEffect(() => {
+  document.addEventListener('click', handler);
+  return () => document.removeEventListener('click', handler);
+}, [handler]);
+```
+
+如果 cleanup 放异步：
+- 一瞬间"旧 handler 已经被新组件销毁，但事件还绑着"
+- 用户点击 → 触发旧 handler → 闭包里指向已销毁的 state → bug 或报错
+
+**Mutation 同步跑 cleanup = 干净退出，不留残余监听**。
+
+#### 为什么 effect 必须异步
+
+effect 里可能跑很重的代码（数据请求、订阅、计算）：
+- 同步跑 → 阻塞 paint → 画面卡顿
+- 异步（宏任务）跑 → paint 先完成 → 用户看到画面 → 再跑 effect
+
+⭐ React 19 用 `MessageChannel.postMessage` 调度 = **宏任务** = 浏览器能在中间 paint。
+
+#### useLayoutEffect 也一样吗
+
+⚠️ 特别注意：
+
+| | useEffect | useLayoutEffect |
+|---|---|---|
+| effect 跑的阶段 | flushPassiveEffects（异步宏任务） | Phase 3 Layout（同步） |
+| cleanup 跑的阶段 | 下次 commit 的 Mutation（同步） | 下次 commit 的 Mutation（同步） |
+
+⭐ **两种 Hook 的 cleanup 都在 Mutation 同步跑**——cleanup 必须同步是统一规则。
+
+---
+
+### 4.2.6 附录：JS 事件循环与 useEffect 异步调度
+
+> 学习者追问："JS 单线程下，微任务一直等待，宏任务会等还是继续？"
+> 这跟 useEffect 为什么是宏任务直接相关。
+
+#### 事件循环精确流程
+
+```
+1. 取一个【宏任务】执行
+   ↓
+2. 执行完后，立刻清空整个【微任务队列】
+   - 队列里的微任务一个个执行
+   - 微任务里又添加新微任务？继续执行直到队列空
+   ↓
+3. 浏览器可能渲染（paint）
+   ↓
+4. 回到步骤 1
+```
+
+⭐ **核心**：宏任务**结束的"附加阶段"** = 清空所有微任务。两者不在同一个层级。
+
+#### 微任务"等待"的两种情况
+
+**情况 A：同步阻塞（死循环）**
+
+```js
+queueMicrotask(() => { while (true) {} });
+setTimeout(() => console.log('timeout'), 0);
+```
+
+→ 微任务死循环 → 永远清不完 → **timeout 永远不打印** → 浏览器卡死
+
+**情况 B：异步让出（await）**
+
+```js
+queueMicrotask(async () => {
+  await fetch('/api');
+  console.log('done');
+});
+setTimeout(() => console.log('timeout'), 0);
+```
+
+→ `await` 让出控制权 → 微任务队列继续推进 → 下一个宏任务（timeout）先跑 → fetch resolve 后 done 才打印
+
+⭐ **结论**：宏任务必须等微任务**全部清空**才能跑。微任务卡住 = 事件循环卡死。
+
+#### 为什么 React 用宏任务调度 useEffect
+
+| 调度方式 | 时序 | 后果 |
+|---|---|---|
+| 微任务（queueMicrotask） | commit → 微任务清空（跑 effect）→ paint | **阻塞 paint** |
+| 宏任务（MessageChannel） | commit → paint → 下一宏任务（跑 effect） | **paint 优先** ✅ |
+
+React 团队故意选了 `MessageChannel.postMessage` 调度 useEffect，就是为了让浏览器**先 paint 给用户看，再跑 effect**。
+
+#### 经典面试题验证
+
+```js
+console.log('1');
+setTimeout(() => console.log('2'), 0);          // 宏任务
+Promise.resolve()
+  .then(() => { console.log('3'); return Promise.resolve(); })   // 微任务
+  .then(() => console.log('4'));                                  // 微任务
+queueMicrotask(() => console.log('5'));                           // 微任务
+console.log('6');
+```
+
+输出：`1 → 6 → 3 → 5 → 4 → 2`
+
+观察：
+- 同步代码先跑（1, 6）= 当前宏任务
+- 微任务队列清空（3 → 5 → 4，按入队顺序+连锁追加）
+- 下一个宏任务（2）
+
+#### 常见 API 分类
+
+| 类型 | 包含 |
+|---|---|
+| **宏任务** | setTimeout / setInterval / I/O / UI 事件 / MessageChannel.postMessage |
+| **微任务** | Promise.then/catch/finally / queueMicrotask / MutationObserver |
+| 特殊 | requestAnimationFrame（paint 前同步） |
+
+---
+
 ### 4.3 root.current 切换的精确时刻
 
 ```

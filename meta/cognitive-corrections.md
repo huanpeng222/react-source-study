@@ -132,4 +132,30 @@
 
 ---
 
+## Day 5 · commit 阶段三子阶段
+
+33. **我以为** commit 是一步到位把 DOM 改了。
+    **其实** 分 3 个子阶段：Before Mutation（拍快照 + 调度 useEffect）→ Mutation（改 DOM + 跑上次 cleanup + 切 root.current）→ Layout（同步跑 useLayoutEffect + 生命周期）。paint 之后才异步 flushPassiveEffects 跑本次的 useEffect 回调。
+
+34. **我以为** useLayoutEffect DOM 就位、useEffect DOM 还没就位。
+    **其实** 两者都在 DOM 已就位之后跑。区别只在 **paint 前后**。**口诀：Layout 看不到（绘制前），Effect 看到了（绘制后）。**
+
+35. **我以为** root.current 切换是 commit 第一步。
+    **其实** 切换发生在 **Mutation 阶段末尾、Layout 开始前**。这样 Layout 阶段的 componentDidMount / useLayoutEffect / this / ref 才能拿到正确的新树语义。如果放第一步，Mutation 操作 DOM 时出错都没法回滚。
+
+36. **我以为** useTransition 用 Suspense 接住低优先级渲染。
+    **其实** useTransition 和 Suspense 是**两个独立机制**。useTransition = 标记 setState 为低优先级 Lane（让 reconcile 可丢弃）；Suspense = 捕获 throw promise 显示 fallback。两者经常配合（搜索场景）但本质独立。**useTransition 不让 commit 可中断，只让 reconcile 可丢弃。**
+
+37. **我以为** Mutation 跑的 cleanup 和异步跑的 effect 是同一个 useEffect 在两个阶段触发。
+    **其实** 跑的不是同一个！Mutation 跑的是**上次 render 返回的 cleanup**，flushPassiveEffects 跑的是**这次 render 新建的回调**。cleanup 的 dep 是闭包捕获的旧值，effect 的 dep 是这次的新值。**口诀：上次 cleanup 同步跑，这次 effect 异步跑。**
+
+38. **我以为** 微任务和宏任务"差不多"。
+    **其实** **宏任务必须等微任务全部清空才能跑**。React 故意用 `MessageChannel.postMessage`（宏任务）调度 useEffect 而不用 `queueMicrotask`（微任务），目的就是让 paint 先发生：微任务调度会阻塞 paint，宏任务调度让浏览器在 commit 完成后立即 paint 给用户看，再跑 effect。
+
+39. **我以为** getSnapshotBeforeUpdate 用于"聊天框新消息追加"。
+    **其实** 底部追加新消息根本不需要这个 API（浏览器自动保持 scrollTop = 视觉不变）。**真正的场景是顶部插入历史消息（上拉加载更早消息）**：DOM 在头部插入 100px → 原内容向下挤 100px → 必须 scrollTop += 100 抵消才能视觉不变。公式：`scrollTop_new = scrollHeight_new - (scrollHeight_old - scrollTop_old)`。
+
+---
+
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
+
