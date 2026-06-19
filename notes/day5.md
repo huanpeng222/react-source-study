@@ -1,0 +1,535 @@
+# Day 5 笔记：commit 阶段三子阶段
+
+> 日期：2026-06-19
+> 主题：reconcile 之后，React 怎么把工作"落地"到真实 DOM
+> 状态：📖 学习中
+
+---
+
+## 零、入场自测（5 分钟，先自己答再往下看）
+
+> ⚠️ 答完再往下看，"不会"明确说"不会"。
+
+1. **commit 阶段的 three sub-phases 是哪三个？分别干什么？**
+2. **useLayoutEffect 和 useEffect 触发的时机精确差在哪？**
+3. **getSnapshotBeforeUpdate 在哪个 sub-phase 调用？为什么需要"快照"？**
+4. **commit 真的完全不可中断吗？React 19 的 useTransition 是怎么影响 commit 的？**
+
+<details>
+<summary>📌 我自己的回答（保留作为对比基线）</summary>
+
+1. 不清楚
+2. useEffect 是在组件挂载阶段执行，此时 dom 还没有就位；useLayoutEffect 是在组件挂载时使用，此时 dom 已经就位，可以操作 dom（⚠️ 时机点反了，下文纠正）
+3. 不清楚
+4. commit 阶段不可中断 ✅；useTransition 是先将优先级不高的渲染用 Suspense 接住，展示 suspense 的 fallback（⚠️ 把 Transition 和 Suspense 混了，下文纠正）
+
+</details>
+
+---
+
+## 一、回顾：commit 阶段在主管道中的位置
+
+```
+JSX → Element → Fiber 树（reconcile，可中断）
+                                   ↓
+                         wIP 树构建完成 + detached DOM 在内存里
+                                   ↓
+                    ★ commit 阶段开始（同步，不可中断）★
+                                   ↓
+                              真实 DOM 更新
+                                   ↓
+                         浏览器接管 layout/paint
+```
+
+**Day 4 你学过**：DOM 节点（detached）在 completeWork 已经创建好。
+
+**Day 5 要回答**：commit 怎么把这些 detached DOM **挂到 document**，怎么触发 effect，怎么处理 ref 绑定，怎么调用类组件生命周期。
+
+---
+
+## 二、commit 三子阶段（核心）
+
+```
+                 commit 阶段总入口：commitRoot()
+                             ↓
+        ┌────────────────────────────────────────────┐
+        │ Phase 1: Before Mutation（变更前）          │
+        │   - 调 getSnapshotBeforeUpdate（类组件）   │
+        │   - 异步调度 useEffect（Passive Effects） │
+        │   - DOM 还没变，可以"读取旧 DOM"做快照     │
+        └────────────────────────────────────────────┘
+                             ↓
+        ┌────────────────────────────────────────────┐
+        │ Phase 2: Mutation（变更）                   │
+        │   - 真正操作 DOM（appendChild / setAttribute）│
+        │   - 卸载旧 ref / 处理 useEffect 旧 cleanup │
+        │   - ★ root.current = wIP（双缓存身份对换）★│
+        └────────────────────────────────────────────┘
+                             ↓
+        ┌────────────────────────────────────────────┐
+        │ Phase 3: Layout（布局后，绘制前）           │
+        │   - 同步执行 useLayoutEffect              │
+        │   - 调 componentDidMount / componentDidUpdate │
+        │   - 绑定新 ref                              │
+        │   - 此时 DOM 已更新但浏览器还没绘制         │
+        └────────────────────────────────────────────┘
+                             ↓
+                        浏览器开始绘制（paint）
+                             ↓
+                useEffect 异步触发（在下一帧前）
+```
+
+⭐ **核心心智模型**：commit 把"变更前的快照 / 真正变更 / 变更后的同步反应" 切成三步。
+
+### 三子阶段对比表（背下来）
+
+| 子阶段 | DOM 状态 | 主要做什么 | 类比 |
+|---|---|---|---|
+| Before Mutation | 还是旧的 | 读取旧 DOM 状态做快照 + 调度 useEffect | "拍照留念" |
+| Mutation | 正在变 | 改 DOM / 切 root.current | "施工现场" |
+| Layout | 已是新的，未绘制 | useLayoutEffect / cDM / cDU / 绑 ref | "验收 + 微调" |
+
+---
+
+## 三、Phase 1：Before Mutation（变更前）
+
+### 3.1 主要做 2 件事
+
+#### A. 调用 `getSnapshotBeforeUpdate`（类组件生命周期）
+
+```jsx
+class Chat extends Component {
+  getSnapshotBeforeUpdate(prevProps, prevState) {
+    // DOM 变更前，读取旧 DOM 状态
+    const list = this.listRef.current;
+    return list.scrollHeight - list.scrollTop;   // 返回快照
+  }
+
+  componentDidUpdate(prevProps, prevState, snapshot) {
+    // DOM 变更后，用快照恢复滚动位置
+    const list = this.listRef.current;
+    list.scrollTop = list.scrollHeight - snapshot;
+  }
+}
+```
+
+#### B. 异步调度 useEffect（不立即跑）
+
+```js
+if (fiber.flags & Passive) {
+  scheduleCallback(NormalPriority, flushPassiveEffects);
+}
+```
+
+⭐ useEffect 在 commit 阶段**只是被"安排"**，不立即执行。等 Phase 3 + 浏览器绘制完，才异步执行。
+
+### 3.2 为什么需要快照（聊天框真实场景）
+
+```
+变更前：list.scrollHeight = 1000，scrollTop = 800
+        → 用户在底部看消息
+
+变更（新消息追加）：list.scrollHeight = 1100
+
+变更后（无快照）：scrollTop 仍 800，但 scrollHeight 变 1100
+        → 用户被"挤"上去 200px，看不到底部 ❌
+
+变更后（有快照）：snapshot=200 → scrollTop = 1100 - 200 = 900
+        → 距离底部仍 200px，用户感觉滚动位置没动 ✅
+```
+
+**典型场景**：聊天框、虚拟列表、保持选区、保持焦点。
+
+⭐ getSnapshotBeforeUpdate 必须在 Phase 1（DOM 还是旧的时）调用——**Phase 2 之后旧 DOM 状态已经丢了**。
+
+---
+
+## 四、Phase 2：Mutation（变更）
+
+### 4.1 真正操作 DOM
+
+```js
+function commitMutationEffects(root, finishedWork) {
+  let nextEffect = finishedWork;
+  while (nextEffect !== null) {
+    const flags = nextEffect.flags;
+    
+    if (flags & Placement) commitPlacement(nextEffect);     // appendChild / insertBefore
+    if (flags & Update)    commitUpdate(nextEffect);        // setAttribute / nodeValue
+    if (flags & Deletion)  commitDeletion(nextEffect);      // removeChild
+    if (flags & Ref)       commitDetachRef(nextEffect);     // 卸载旧 ref
+    if (flags & Passive)   commitPassiveUnmount(nextEffect);// 跑 useEffect 旧 cleanup
+    
+    nextEffect = ...; // 子树有 effect 才进入（subtreeFlags 剪枝）
+  }
+  
+  // ★★ 关键：切换 root.current ★★
+  root.current = finishedWork;
+}
+```
+
+### 4.2 操作动作
+
+| flag | DOM 操作 |
+|---|---|
+| `Placement` | `parent.insertBefore(child, anchor)` 或 `appendChild` |
+| `Update` | `setAttribute / element.style.x / textNode.nodeValue` |
+| `Deletion` | `parent.removeChild(child)` |
+| `Ref` | 先调 `oldRef.current = null` |
+| `Passive` | 跑上次 useEffect 的 return cleanup |
+
+⭐ Day 3 §6.6 "DOM 移动触发 useEffect 重跑"就是在这一步——`insertBefore` 把已存在 DOM 先 detach 再 attach，触发 useEffect cleanup + rerun。
+
+### 4.3 root.current 切换的精确时刻
+
+```
+Mutation 末尾 → root.current = finishedWork（wIP 升格 current）
+```
+
+**为什么放在 Mutation 末尾、Layout 开始前？**
+
+因为 Phase 3 的：
+- `componentDidMount` 里访问 `this`
+- `useLayoutEffect` 里访问 `ref.current`
+- `componentDidUpdate(prev, prev, snapshot)` 里访问 `this`
+
+这些都需要"我现在是 current 树上的"语义。如果 root.current 还指向旧树，Layout 阶段所有 this/ref 都是错的。
+
+⭐ Day 2 §4.7 学的"createWorkInProgress 复用 alternate"，今天补全了"alternate 指针切换的精确时刻 = Mutation 末尾"。
+
+---
+
+## 五、Phase 3：Layout（布局后，绘制前）
+
+### 5.1 主要做 4 件事
+
+#### A. 同步执行 `useLayoutEffect`
+
+```jsx
+function MyComp() {
+  const ref = useRef(null);
+  
+  useLayoutEffect(() => {
+    // 此时 DOM 已更新，但浏览器还没绘制
+    // 可以同步读 DOM 尺寸 + 改 DOM，浏览器只 paint 一次
+    const { width } = ref.current.getBoundingClientRect();
+    if (width > 100) {
+      ref.current.style.fontSize = '12px';
+    }
+  });
+  
+  return <div ref={ref}>...</div>;
+}
+```
+
+⭐ **核心**：`useLayoutEffect` **同步阻塞**——浏览器在等它跑完才绘制。
+
+#### B. 调 `componentDidMount` / `componentDidUpdate`
+
+#### C. 绑定新 ref
+
+```js
+if (flags & Ref) {
+  commitAttachRef(fiber);  // ref.current = fiber.stateNode
+}
+```
+
+#### D. 处理 setState 排队
+
+如果 useLayoutEffect 里调 setState，**会立刻进入下一轮 reconcile**——但保证在浏览器绘制前完成。这就是 useLayoutEffect 的"阻塞代价"。
+
+### 5.2 useLayoutEffect vs useEffect 时序图（必背）
+
+```
+[reconcile 完成，wIP 树就绪]
+        ↓
+[Phase 1: Before Mutation]
+   - getSnapshotBeforeUpdate
+   - 调度 useEffect（不立即跑，进 schedule 队列）
+        ↓
+[Phase 2: Mutation]
+   - 操作 DOM（appendChild / setAttribute / removeChild）
+   - 卸载旧 ref / 跑 useEffect 旧 cleanup
+   - ★ root.current = wIP ★
+        ↓
+[Phase 3: Layout]
+   - ★ useLayoutEffect 同步跑 ★ DOM 已变，未绘制
+   - componentDidMount / componentDidUpdate
+   - 绑定新 ref
+        ↓
+   [浏览器 paint] ← 用户看到画面
+        ↓
+[异步任务]
+   - ★ useEffect 异步跑 ★ DOM 已变，已绘制
+        ↓
+   [完成]
+```
+
+### 5.3 useLayoutEffect vs useEffect 对比表
+
+| | useLayoutEffect | useEffect |
+|---|---|---|
+| DOM 就位了吗 | ✅ 已就位 | ✅ 已就位 |
+| 浏览器绘制了吗 | ❌ 还没绘制 | ✅ 已绘制 |
+| 阻塞绘制 | ✅ 阻塞 | ❌ 不阻塞 |
+| 用户看到的内容 | 还是上一帧 | 已经是新一帧 |
+| 适合场景 | 测量 DOM 尺寸 + 同步改 DOM（避免闪烁） | 数据请求 / 订阅 / 不影响视觉的副作用 |
+| 性能 | 慢（阻塞绘制） | 快（绘制后异步） |
+
+**记忆口诀**：
+
+> **Layout 看不到（绘制前），Effect 看到了（绘制后）。**
+
+### 5.4 经典面试题
+
+```jsx
+function App() {
+  const [n, setN] = useState(0);
+  
+  console.log('render:', n);
+  
+  useLayoutEffect(() => {
+    console.log('useLayoutEffect:', n);
+  }, [n]);
+  
+  useEffect(() => {
+    console.log('useEffect:', n);
+  }, [n]);
+  
+  return <button onClick={() => setN(n + 1)}>{n}</button>;
+}
+```
+
+第一次点击，console 顺序：
+
+```
+render: 1                 ← reconcile 阶段（用户函数）
+useLayoutEffect: 1        ← Phase 3 同步
+（浏览器绘制，用户看到 1）
+useEffect: 1              ← 异步触发
+```
+
+⭐ **必背时序**。
+
+---
+
+## 六、commit 真的不可中断吗
+
+### 6.1 严格说
+
+| | 是否可中断 |
+|---|---|
+| Phase 1 Before Mutation | ❌ 不可中断 |
+| Phase 2 Mutation | ❌ 不可中断 |
+| Phase 3 Layout（含 useLayoutEffect）| ❌ 不可中断 |
+| useEffect 触发（异步）| ✅ 在 schedule 队列里，可被高优先级打断 |
+
+### 6.2 为什么 commit 必须同步
+
+```
+如果 commit 可中断：
+
+[Mutation 跑到一半] ← 用户输入打断
+   - 已经 setAttribute('class', 'new')
+   - 还没 setAttribute('style', 'color:red')
+[让出主线程]
+   - 浏览器 paint：用户看到 "类名是 new 但颜色还是旧的"
+[Mutation 恢复]
+
+= 残缺画面 ❌
+```
+
+### 6.3 useTransition 怎么影响 commit
+
+⚠️ **澄清两个常见误解**：
+
+1. **useTransition ≠ Suspense**（两件不同的事）
+2. **useTransition 不让 commit 可中断**（只让 reconcile 可中断）
+
+| | useTransition | Suspense |
+|---|---|---|
+| 干啥 | 把 setState **标记**为低优先级 | 在数据/组件加载时显示 fallback |
+| 关系 | 经常配合 | 但本质独立 |
+
+**useTransition 的真实作用**：
+
+```jsx
+const [isPending, startTransition] = useTransition();
+
+startTransition(() => {
+  setSearchQuery(input);  // 标记为 Transition Lane（低优先级）
+});
+```
+
+- 这次 reconcile 走低优先级
+- 中间有高优先级 setState 进来 → **丢弃这次 wIP，先处理高优先级**
+- 一旦进入 commit → **同步跑完，不可中断**
+
+⭐ **本质**：useTransition 让 reconcile **可被丢弃重做**，commit 始终原子。
+
+### 6.4 Suspense 真实作用（顺便讲）
+
+```jsx
+<Suspense fallback={<Loading />}>
+  <SlowComponent />  {/* 内部 throw promise */}
+</Suspense>
+```
+
+`<SlowComponent>` 内部 throw 一个 Promise（如 `use(promise)`），Suspense 捕获并显示 fallback。
+
+**Transition + Suspense 经典配合（搜索场景）**：
+
+```jsx
+const [isPending, startTransition] = useTransition();
+const [query, setQuery] = useState('');
+
+const handleChange = (e) => {
+  startTransition(() => {
+    setQuery(e.target.value);
+  });
+};
+
+return (
+  <>
+    <input value={query} onChange={handleChange} />
+    <Suspense fallback={<Spinner />}>
+      <SearchResults query={query} />
+    </Suspense>
+  </>
+);
+```
+
+两者**叠加**，不是 Transition "用了" Suspense。
+
+---
+
+## 七、整个 commit 流程串起来
+
+```
+[reconcile 完成 → wIP 树 + detached DOM 都准备好]
+                  ↓
+         commitRoot(finishedWork)
+                  ↓
+┌─────────────────────────────────────────────┐
+│ Phase 1: Before Mutation                    │
+│   - getSnapshotBeforeUpdate                 │
+│   - 调度 useEffect（不立即跑）               │
+└─────────────────────────────────────────────┘
+                  ↓
+┌─────────────────────────────────────────────┐
+│ Phase 2: Mutation                           │
+│   - 按 flags 操作 DOM                        │
+│   - 卸载旧 ref + 跑 useEffect 旧 cleanup    │
+│   - ★ root.current = finishedWork ★         │
+└─────────────────────────────────────────────┘
+                  ↓
+┌─────────────────────────────────────────────┐
+│ Phase 3: Layout                             │
+│   - 同步跑 useLayoutEffect                  │
+│   - 调 cDM / cDU                            │
+│   - 绑定新 ref                               │
+└─────────────────────────────────────────────┘
+                  ↓
+[浏览器 paint]
+                  ↓
+[异步：flushPassiveEffects]
+   - 异步跑 useEffect
+                  ↓
+                完成
+```
+
+---
+
+## 八、自测点评（学习者答完后回填）
+
+### Q1 三子阶段：⚪ 不清楚
+
+→ 见 §2-§5 详解。三阶段名背下来：**Before Mutation / Mutation / Layout**。
+
+### Q2 useEffect vs useLayoutEffect：🟡 时机点反了
+
+学习者答："useEffect 是在组件挂载阶段执行，此时 dom 还没有就位；useLayoutEffect 是在组件挂载时使用，此时 dom 已经就位"
+
+**纠正**：两者**都在 DOM 已就位之后跑**。区别只在 **paint 之前还是之后**：
+
+| | useLayoutEffect | useEffect |
+|---|---|---|
+| DOM 就位 | ✅ | ✅ |
+| 浏览器绘制 | ❌ 还没 | ✅ 已绘制 |
+
+**记忆口诀**：**Layout 看不到（绘制前），Effect 看到了（绘制后）。**
+
+### Q3 getSnapshotBeforeUpdate：⚪ 不清楚
+
+→ 见 §3.2。核心场景：聊天框新消息追加时保持滚动位置。
+
+### Q4 commit 中断 + useTransition：🟡 部分对
+
+✅ commit 不可中断（答对）
+
+⚠️ "useTransition 用 Suspense 接住" → **混淆了两个独立机制**。
+- useTransition = 把 setState 标记为低优先级 Lane（让 reconcile 可丢弃）
+- Suspense = 捕获 throw promise 显示 fallback
+- 两者经常配合但本质独立
+- useTransition **不让 commit 可中断**，只让 reconcile 可丢弃
+
+→ 见 §6 详解。
+
+---
+
+## 九、动手实验
+
+详见 `demos/day5/README.md`，3 个实验：
+
+| 实验 | 目标 | 产出 |
+|---|---|---|
+| F1. useLayoutEffect vs useEffect 时序 | console 看精确顺序 | `F1-console.txt` |
+| F2. 用 useLayoutEffect 修复闪烁 | 反例：用 useEffect 会闪烁 | `F2-flicker.gif` |
+| F3. 验证 root.current 切换时机 | DevTools 看 alternate 切换 | `F3-screenshots/` |
+
+---
+
+## 十、我之前以为 …，其实是 …（5 条认知纠正）
+
+1. **我以为** commit 是一步到位地"把 DOM 改了"。
+   **其实** 分 **3 个子阶段**：Before Mutation（快照）→ Mutation（改 DOM + 切 current）→ Layout（同步 effect）。
+
+2. **我以为** useLayoutEffect DOM 就位、useEffect DOM 还没就位。
+   **其实** 两者都在 DOM 已就位之后跑。区别只在 paint 之前还是之后。**口诀：Layout 看不到，Effect 看到了。**
+
+3. **我以为** root.current 切换是 commit 阶段第一步。
+   **其实** 切换发生在 **Mutation 阶段末尾、Layout 开始前**。这样 Layout 阶段的 cDM / useLayoutEffect 才能拿到正确的 this 和 ref。
+
+4. **我以为** useTransition 是用 Suspense 接住低优先级渲染。
+   **其实** useTransition 和 Suspense 是**两个独立机制**。useTransition = 标记 setState 为低优先级 Lane（让 reconcile 可丢弃）；Suspense = 捕获 throw promise。两者经常配合但本质独立。**useTransition 不让 commit 可中断，只让 reconcile 可丢弃。**
+
+5. **我以为** getSnapshotBeforeUpdate 是个生僻 API。
+   **其实** 它解决了非常真实的问题：DOM 变更前后保持滚动位置 / 焦点 / 选区。在聊天框、虚拟列表场景里几乎是必备。
+
+---
+
+## 十一、Day 5 验收清单
+
+- [ ] 能默写 commit 三子阶段名 + 各自做的事
+- [ ] 能解释 useLayoutEffect 和 useEffect 触发时机的精确差异
+- [ ] 能说清 root.current 切换的时机和原因
+- [ ] 能讲清 getSnapshotBeforeUpdate 解决什么问题
+- [ ] 能解释 commit 为什么不可中断（用户视觉一致性）
+- [ ] 能讲清 useTransition 和 Suspense 的独立性
+- [ ] 完成 3 个动手实验
+- [ ] 写下 5 条认知纠正
+
+---
+
+## 十二、Day 6 预告（W2 开始：Hooks 实现原理）
+
+**主题**：useState 源码——dispatch 函数、Hook 链表、updateQueue
+
+**预读问题**：
+
+1. `setN(n + 1)` 和 `setN(prev => prev + 1)` 在源码里有什么区别？
+2. 多次连续 `setN` 调用，React 怎么批处理？
+3. useState 的 lazy init `useState(() => expensiveCompute())` 是什么时候跑的？
+4. 函数式更新 `setN(prev => prev + 1)` 的 prev 来自哪里？
+
+明天见 👋
