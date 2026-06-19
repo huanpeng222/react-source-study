@@ -829,14 +829,138 @@ return (
 
 ## 十一、Day 5 验收清单
 
-- [ ] 能默写 commit 三子阶段名 + 各自做的事
-- [ ] 能解释 useLayoutEffect 和 useEffect 触发时机的精确差异
-- [ ] 能说清 root.current 切换的时机和原因
-- [ ] 能讲清 getSnapshotBeforeUpdate 解决什么问题
-- [ ] 能解释 commit 为什么不可中断（用户视觉一致性）
-- [ ] 能讲清 useTransition 和 Suspense 的独立性
+- [x] 能默写 commit 三子阶段名 + 各自做的事
+- [x] 能解释 useLayoutEffect 和 useEffect 触发时机的精确差异
+- [x] 能说清 root.current 切换的时机和原因
+- [x] 能讲清 getSnapshotBeforeUpdate 解决什么问题
+- [x] 能解释 commit 为什么不可中断（用户视觉一致性）
+- [x] 能讲清 useTransition 和 Suspense 的独立性
 - [ ] 完成 3 个动手实验
-- [ ] 写下 5 条认知纠正
+- [x] 写下 5 条认知纠正
+
+---
+
+## 十一·五、自我验收 + AI 纠正（00:39 用户主动默写）
+
+### 学习者答 vs 标准答（逐条对照）
+
+#### 1. commit 三子阶段名 + 各自做的事
+
+学习者答：
+> Phase 1 before mutation：存快照，发起 useEffect 的调度，不是真正执行
+> Phase 2 mutation：进行 Current.root 的切换，执行上一次 useEffect 的 cleanup
+> Phase 3 layout/point：同步执行 useLayoutEffect，浏览器等她调度完才执行，调度 componentDidMount / componentDidUpdate，处理 setState 的排队执行
+
+🟢 **方向 90% 正确**，3 处精度需补：
+
+| Phase | 漏的关键点 |
+|---|---|
+| Phase 1 | useEffect 是被"调度"，回调真正跑是在 paint 之后异步 |
+| Phase 2 | **漏了"按 flags 改 DOM"——这是 Mutation 的主菜**！cleanup（含 useEffect + useLayoutEffect 两种）+ 卸载旧 ref + 切 root.current 都是顺带做的 |
+| Phase 3 | 漏了"绑定新 ref"。"layout/point"是 layout 拼成 point，应是 paint |
+
+#### 2. 学习者的疑问：Layout 阶段也跑 useEffect 吗
+
+🔴 **不**。精确答案：
+
+```
+Layout 阶段只跑 useLayoutEffect 回调 + 类组件 cDM/cDU + 绑 ref
+useEffect 回调跑在 paint 之后的宏任务（flushPassiveEffects）里
+```
+
+| Hook | 回调跑的阶段 | 同步/异步 |
+|---|---|---|
+| useLayoutEffect 回调 | Phase 3 Layout | 同步（阻塞 paint） |
+| useEffect 回调 | paint 后 flushPassiveEffects | 异步（不阻塞 paint） |
+
+⭐ useEffect 在 commit 里只被"调度"（Phase 1），**回调真正执行在 paint 之后**。
+
+#### 3. useLayoutEffect vs useEffect 时机
+
+学习者答：
+> useLayoutEffect 看不到新 dom。但是已经加载了，只是还没有渲染，useEffect 是在 dom 已经完全渲染后执行
+
+🟢 **完全正确**，措辞精确化：
+- "加载了" → DOM 已就位
+- "渲染" → paint（绘制）
+
+口诀：**Layout 看不到（绘制前），Effect 看到了（绘制后）。**
+
+#### 4. root.current 切换时机 + 原因
+
+学习者答：
+> 时机在 commit 的第二步，mutation 阶段，原因不清楚
+
+🟢 时机对（更精确：**Mutation 末尾**），原因没答。
+
+**完整原因**：
+Layout 阶段的 cDM / useLayoutEffect / this / ref.current 都需要"我现在是 current 树上的"语义。
+- 如果切换放 Phase 1 开始 → Mutation 操作 DOM 出错都没法回滚
+- 如果切换放 Layout 之后 → Layout 阶段的 this 和 ref 都是旧的，cDM 就拿不到新 DOM
+
+切换时机必须**在"DOM 已完全改好"之后、"Layout 访问 this/ref"之前**夹住——即 Mutation 末尾。
+
+#### 5. getSnapshotBeforeUpdate
+
+学习者答：
+> 记住上一次更新的快照，防止在下一次渲染时丢失状态，给用户造成页面抖动
+
+🟢 **完全正确**。
+
+精确补充：抖动根源是 **DOM 变更前后用户可视区"相对位置"漂移**。快照记的是"相对位置"，变更后恢复。
+真实场景：聊天框上拉加载历史消息（顶部插入 → 原内容下挤 → 必须 scrollTop += 增长量抵消）。
+
+#### 6. commit 为什么不可中断
+
+学习者答：
+> 更新到一半中断时，会出现展示割裂，一半新数据一半老数据
+
+🟢 **完全正确**。这就是核心理由——**用户视觉一致性**。
+
+#### 7. useTransition
+
+学习者答：
+> useTransition 是延缓组件的 commit 时机，不是中断 commit
+
+🔴 **不是延缓 commit，是延缓 reconcile**。
+
+```
+普通 setState：reconcile（高优先级）→ commit
+useTransition setState：reconcile（低优先级 Lane，可被高优先级丢弃重做）→ commit
+                              ↑
+                          这里可中断、可重做
+
+一旦进入 commit → 同步跑完，不可中断（commit 永远原子）
+```
+
+**精确版**：useTransition 让 **reconcile 阶段可中断、可丢弃重做**——给紧急更新（如用户输入）让路。
+**不影响 commit**。
+
+记忆口诀：**Transition 影响 reconcile，不影响 commit。**
+
+#### 8. Suspense
+
+学习者答：
+> Suspense 是 Promise 未 resolve 时展示的 fallback 样式
+
+🟢 **完全正确**。
+
+### 自我验收得分
+
+| 项 | 评分 |
+|---|---|
+| commit 三子阶段 | 🟢 90% |
+| 学习者疑问（Layout 跑 useEffect？） | 🔴 不 |
+| useLayoutEffect vs useEffect 时机 | 🟢 95% |
+| root.current 切换 | 🟢 70%（时机对、原因没答） |
+| getSnapshotBeforeUpdate | 🟢 100% |
+| commit 不可中断 | 🟢 100% |
+| useTransition | 🔴 错（延缓的是 reconcile，不是 commit） |
+| Suspense | 🟢 100% |
+
+⭐ **最值得记的两个纠正**：
+1. **useEffect 回调跑在 paint 后异步**，不在 Layout 阶段
+2. **useTransition 影响 reconcile，不影响 commit**
 
 ---
 
