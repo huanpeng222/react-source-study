@@ -417,6 +417,62 @@ useMemo(() => expensiveCompute(), [deps]);  // useMemo 本身就是 lazy
 
 ## 六、回到入场自测的 4 题（标准答）
 
+### 学习者答题记录（21:40 现场）
+
+| Q | 学习者答 | 评 |
+|---|---|---|
+| Q1 值更新 vs 函数式 | "函数式更新能使避免出现闭包更新不及时问题" | 🟢 70%（答到了应用层后果，但没答源码层面的 action 存值 vs 函数） |
+| Q2 多次 setN | "只触发一次 render，最终 n 还是只 +1 的那个值" | 🟢 100% ⭐ 完全正确 |
+| Q3 lazy init 何时跑 | "不清楚" | ⚪ |
+| Q4 prev 来自 | "fiber.memoizedState 里面维护的链表数据结构里" | 🟡 方向对（确实在 Hook 链表里），但精确说是"reducer 计算过程中的中间结果" |
+
+### 关键纠正
+
+#### Q1 精确化：源码层面的本质差异
+
+学习者答"避免闭包不及时"是**应用结果**，不是**源码差异**。
+
+源码层面：
+
+```js
+setN(1)                  // action = 1（值，已计算）
+setN(prev => prev + 1)   // action = (prev) => prev + 1（函数）
+
+// update 阶段 reducer：
+newState = typeof action === 'function' ? action(newState) : action;
+```
+
+**源码区别**：action 字段一个存值、一个存函数。reducer 计算时用 `typeof === 'function'` 分流。
+**应用结果**：你说的"闭包不及时"问题就是值更新会被同闭包锁定的副作用。
+
+#### Q4 精确化：prev 不是从 fiber 直接读的某个字段
+
+学习者方向对（在 Hook 链表里），但精确说：
+
+```
+prev 不是固定字段值，而是 update 链表 reducer 累积过程的中间结果。
+
+具体路径：
+fiber.memoizedState（Hook）.queue.pending → 拿到所有 update 的环形链表
+  ↓
+从 hook.baseState 开始（上次稳定的值）
+  ↓
+依次：newState = (typeof action === 'function') ? action(newState) : action
+  ↓
+prev = "上一次循环的 newState"
+```
+
+**关键**：连续 3 次 `setN(prev => prev + 1)`：
+- 第 1 个 update：newState = action_1(0) = 1，prev=0
+- 第 2 个 update：newState = action_2(1) = 2，prev=1
+- 第 3 个 update：newState = action_3(2) = 3，prev=2
+
+prev 是"链表 reduce 过程中累积的中间值"，不是从 fiber 里读的某个固定字段。
+
+---
+
+### 标准答（完整版）
+
 ### Q1：setN(n+1) vs setN(prev => prev+1) 区别
 
 | | setN(n + 1) | setN(prev => prev + 1) |
