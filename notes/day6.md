@@ -415,6 +415,75 @@ useMemo(() => expensiveCompute(), [deps]);  // useMemo 本身就是 lazy
 
 ---
 
+### 5.4 ⭐ 学习者追问：为什么差这一对括号差距这么大？
+
+> 学习者疑问（23:18）：`useState(expensiveCompute())` 和 `useState(() => expensiveCompute())` 看起来只差一个箭头函数包裹，为啥行为差这么多？
+
+**关键澄清**：差异不在 useState，而在 **JS 的函数参数语义**。
+
+#### 根本原因：JS 函数参数立即求值
+
+```js
+useState(expensiveCompute())
+// 1. JS 引擎先调用 expensiveCompute() → 拿到结果（比如 999）
+// 2. 把 999 传给 useState
+// → expensiveCompute() 一定会被执行，与 useState 内部逻辑无关！
+
+useState(() => expensiveCompute())
+// 1. JS 引擎创建一个箭头函数对象（几乎零成本）
+// 2. 把这个函数对象传给 useState
+// → expensiveCompute() 没被执行，要等 useState 内部决定要不要调它
+```
+
+⭐ **核心洞察**：参数求值在调用 useState **之前**就发生了。`useState` 内部完全控制不了"传进来的 initialState 是怎么算出来的"。
+
+#### update 阶段两种写法的对比
+
+| 阶段 | `useState(expensiveCompute())` | `useState(() => expensiveCompute())` |
+|---|---|---|
+| **mount** | 跑 expensiveCompute() 拿 999，存 hook | 跑 expensiveCompute() 拿 999，存 hook |
+| **update** | ❌ **仍跑 expensiveCompute()**（JS 语法决定），但 useState 直接忽略结果 | ✅ 只创建函数对象，expensiveCompute 不跑 |
+
+**update 阶段 useState 源码**：
+
+```js
+function updateState(initialState) {
+  return updateReducer(basicStateReducer, initialState);
+  //                                       ↑ 这个参数压根没用，从 Hook 链表读
+}
+```
+
+⭐ 你传的 999 / 函数都被无视——但 999 是 **你已经付出 1 秒计算代价才得到的**，浪费了。
+
+#### 类比
+
+| 写法 | 类比 |
+|---|---|
+| `useState(expensiveCompute())` | 你妈每天问"今晚吃啥"，你**先做了一桌满汉全席**摆桌上再问"要不要吃"。她说不用，你倒掉。**每天倒一桌菜**。 |
+| `useState(() => expensiveCompute())` | 你妈每天问"今晚吃啥"，你**先给她一张菜单**。她说要吃才去做。**只有 mount 那天做了一次**。 |
+
+#### 实战常见坑
+
+```jsx
+// ❌ 每次 render 读 localStorage + JSON.parse（看似快，频繁触发就累积）
+const [user, setUser] = useState(JSON.parse(localStorage.getItem('user')));
+
+// ✅ 只 mount 时读一次
+const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('user')));
+```
+
+```jsx
+// ❌ 每次 render 生成新数组
+const [list, setList] = useState(new Array(10000).fill(0));
+
+// ✅ 只 mount 时生成
+const [list, setList] = useState(() => new Array(10000).fill(0));
+```
+
+⭐ **判断规则**：只要初始值需要"**昂贵计算 / IO / 大对象创建**"，都用 lazy 形式。**便宜的字面量（数字/字符串/小对象）随意**。
+
+---
+
 ## 六、回到入场自测的 4 题（标准答）
 
 ### 学习者答题记录（21:40 现场）
