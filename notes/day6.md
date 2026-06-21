@@ -607,14 +607,150 @@ fiber.memoizedState (Hook).queue.pending → 拿到所有 update
 
 ## 九、Day 6 验收清单
 
-- [ ] 能讲清 setN 值更新和函数式更新的源码差异
-- [ ] 能解释为什么 3 次 setN(n+1) 只让 n 变 1，3 次 setN(prev=>prev+1) 能到 3
-- [ ] 能说出 lazy init 在 mount 跑一次、update 阶段被忽略
-- [ ] 能讲清 React 17 vs React 18 自动批处理范围差异
-- [ ] 能默写 Hook 节点的核心字段（memoizedState / queue / next）
-- [ ] 知道 dispatch 函数引用稳定的原因
+- [x] 能讲清 setN 值更新和函数式更新的源码差异
+- [x] 能解释为什么 3 次 setN(n+1) 只让 n 变 1，3 次 setN(prev=>prev+1) 能到 3
+- [x] 能说出 lazy init 在 mount 跑一次、update 阶段被忽略
+- [x] 能讲清 React 17 vs React 18 自动批处理范围差异
+- [x] 能默写 Hook 节点的核心字段（memoizedState / queue / next）
+- [x] 知道 dispatch 函数引用稳定的原因
 - [ ] 完成 3 个动手实验
 - [ ] 写下 5 条认知纠正
+
+---
+
+## 9.5、自我验收 + AI 纠正（23:44 现场）
+
+学习者主动默写 6 项验收点，AI 逐条对照标准答。
+
+### 项 1：值更新 vs 函数式源码差异
+
+> 学习者答："值更新 action 存计算好的值，函数式存函数，会在需要执行的时候才执行——疑问：执行时是 mount 还是 update？"
+
+🟢 **方向 90% 对**，疑问命中要害。
+
+**精确答**：action 执行在 **update 阶段**（下次 render 时跑 `updateReducer`）。
+
+```
+点 setN(prev => prev+1)
+  ↓
+仅入队：update = { action: 函数 } 进 queue.pending
+  ↓ 触发 schedule，下次 render
+beginWork → renderWithHooks → useState → updateReducer:
+  for each update in queue.pending:
+    newState = typeof action === 'function' ? action(newState) : action;
+```
+
+⭐ **核心时序**：dispatch 时**只入队**，update 阶段才**执行**。
+
+### 项 2：3 次 setN(n+1) 为啥只 +1
+
+> 学习者答："3 次 setN(n+1) 同一函数内 action 没更新，所以一直用的同一个"
+
+🟡 **方向对，措辞偏**。
+
+**精确版**：不是 action 没更新，是 **3 个 update 的 action 计算结果全是同一个值 1**（n 闭包都是 0）：
+
+```
+queue = [
+  update { action: 1 },   // setN(0+1)
+  update { action: 1 },   // setN(0+1)
+  update { action: 1 },   // setN(0+1)
+]
+↓ update 阶段 reduce：
+0 → 1 → 1 → 1   ← 用 1 覆盖 1 覆盖 1
+最终 = 1
+```
+
+函数式则是：
+
+```
+queue = [
+  update { action: prev => prev+1 },
+  update { action: prev => prev+1 },
+  update { action: prev => prev+1 },
+]
+↓ reduce 时每次拿"上次计算结果"作为 prev：
+0 → action(0)=1 → action(1)=2 → action(2)=3
+最终 = 3
+```
+
+### 项 3：lazy init
+
+> 学习者答："mount 跑一次 update 被忽略，initState 传参最好传常量或箭头函数，不要直接传函数的调用"
+
+🟢 **完美**。"不要直接传函数的调用"这个总结非常到位——抓到了 §5.4 的精髓（JS 函数参数立即求值）。
+
+### 项 4：自动批处理
+
+> "17 之前 promise/setTimeout 不批处理，18 之后也会了"
+
+🟢 **完全正确**。
+
+### 项 5：Hook 字段 memoizedState / queue
+
+> 学习者答："memoizedState 存 actions 值，queue 存需要调用执行的函数"
+
+🔴 **两个字段都讲反了**！
+
+**精确版**：
+
+```js
+hook = {
+  memoizedState: 5,           // ★ 当前 state 的【值】（不是 action）
+  baseState: 5,               // 上次 reducer 计算完成的基线（处理 Suspense 中断时用）
+  baseQueue: null,            // 暂留的 update 链
+  queue: {                    // ★ update 队列【容器】
+    pending: 环形链表,         // 还没处理的 update（每个 update 里才有 action）
+    dispatch: setN,           // 缓存的 dispatch 函数（mount 时 bind 出来）
+    lastRenderedReducer: basicStateReducer,
+    lastRenderedState: 5,
+  },
+  next: 下一个 Hook,
+};
+
+update = {                    // queue.pending 链表里的每个节点
+  action: 1 或 (prev => prev+1),   // ★ 这才是 action
+  next: ...,
+  lane: ...,
+};
+```
+
+⭐ **关键区分**（背下来）：
+- `memoizedState` = **结果值**（state，比如 n=5）
+- `queue` = **任务队列容器**（含 pending / dispatch / reducer 缓存）
+- `queue.pending` = update 环形链表（每个 update 里有 action）
+- `action` 在 update 节点上，不直接在 hook 上
+
+### 项 6：dispatch 引用稳定
+
+> "只在 mount 阶段创建，update 不会创建"
+
+🟢 **对**。精确化：
+
+```js
+// mount 时
+hook.queue.dispatch = dispatch = bind(dispatchReducerAction, fiber, queue);
+
+// update 时
+const dispatch = queue.dispatch;   // 直接复用 mount 时 bind 出来的引用
+```
+
+⭐ **实战意义**：setN 在 useEffect 依赖数组里写不写都不会触发 effect 重跑——引用永远稳定。这就是为什么 React 官方说"`setState` / `dispatch` 不需要写进依赖"。
+
+---
+
+## 9.6、6 项总结
+
+| 项 | 我的状态 |
+|---|---|
+| 值更新 vs 函数式源码差异 | ✅ 方向对 + 主动提疑问 |
+| 3 次 setN 差距 | 🟡 措辞偏，需精确"action 计算结果都是 1" |
+| lazy init | ✅ 完美 |
+| 自动批处理 | ✅ 完美 |
+| **Hook 字段含义** | ❌ **memoizedState 和 queue 讲反了，必须重看 §1** |
+| dispatch 引用稳定 | ✅ 对 |
+
+⭐ **最大错点**：Hook 字段——重看 day6.md §1 把"memoizedState = 值 / queue = 队列容器 / action 在 update 里"刻进去。
 
 ---
 
