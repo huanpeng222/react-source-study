@@ -302,7 +302,74 @@ effect 进两条链表：
 
 ---
 
-## 七、动手实验
+## 7.5、入场自测点评（14:51 现场）
+
+学习者答题记录：
+
+| Q | 学习者答 | 评分 |
+|---|---|---|
+| Q1 useEffect/useLayoutEffect 源码差异 | 不清楚 | ⚪ |
+| Q2 effect 挂哪、和 Hook 链表关系 | 不清楚 | ⚪ |
+| Q3 deps 浅比较时机 + 比什么 | "render 阶段，比较对象引用" | 🟡 60% |
+| Q4 cleanup 何时存、存哪 | "下次更新执行上次 effect return；存在 memoizedState" | 🟡 50% |
+
+### Q3 纠正：时机对了一半，"比引用"不全对
+
+> 学习者答："render 阶段，比较对象引用"
+
+🟡 **"render 阶段"方向对**（精确说是 update 阶段的 `updateEffectImpl`，属于 beginWork → renderWithHooks 的一部分，确实在 render 阶段）。
+
+❌ **"比较对象引用"不全对**：
+
+`areHookInputsEqual` 用 **`Object.is` 逐项比较 deps 数组的每一个元素**，不是"比较整个数组对象的引用"：
+
+```js
+for (let i = 0; i < prevDeps.length; i++) {
+  if (Object.is(nextDeps[i], prevDeps[i])) continue;  // 逐项
+  return false;
+}
+```
+
+- deps 里是**基本类型**（`[count]`）→ 比的是值
+- deps 里是**引用类型**（`[obj]`）→ 比的是引用
+
+⭐ 精确说法：**对 deps 数组逐项做 Object.is**。基本类型比值、引用类型比引用——所以 deps 放对象/函数容易每次都"变"（引用每次 render 新建）。
+
+### Q4 纠正：时机对，存的位置错
+
+> 学习者答："下次更新执行上次 effect 的 return；存在 memoizedState"
+
+✅ **"下次更新执行上次 return"——时机对**（Day 5 学的 cleanup 在下次 commit 跑）。
+
+❌ **"存在 memoizedState"——位置不够精确**：
+
+cleanup（create 的返回值）存在 **`effect.inst.destroy`**，不是直接存在 memoizedState 上：
+
+```js
+type Effect = {
+  tag, create, deps,
+  inst: { destroy },   // ★ cleanup 存这里
+  next,
+};
+```
+
+关系链：
+```
+hook.memoizedState = effect 对象
+effect.inst.destroy = cleanup 函数   ← cleanup 真正的家
+```
+
+所以"存在 memoizedState"只对了一半——memoizedState 指向 effect 对象，cleanup 在 effect 的 inst.destroy 里，**隔了两层**。
+
+⭐ 为什么单独放 inst：源码注释说 destroy 是有状态的，要跨 render 保持同一个 inst 引用。
+
+### Q1 / Q2 不清楚 → 看正文
+
+- Q1：useEffect 和 useLayoutEffect 调同一套 impl，只差 **fiberFlags（PassiveEffect vs UpdateEffect）+ hookFlags（HookPassive vs HookLayout）** 两个 flag（§2）
+- Q2：effect 同时挂**两条链表**——Hook 链表（memoizedState，比 deps 用）+ updateQueue 环形 effect 链表（commit 遍历用）（§3）
+
+---
+
 
 详见 `demos/day7/README.md`，3 个实验：
 
