@@ -132,6 +132,62 @@ effect.tag = HookHasEffect | hookFlags;   // HookPassive 或 HookLayout
 | `HookLayout`（useLayoutEffect）| Layout 子阶段**同步**跑（paint 前）|
 | `HookPassive`（useEffect）| paint 后 **flushPassiveEffects** 异步跑 |
 
+### 2.2.5 ⭐ 两个 flag 的确切数值（源码核对）
+
+> 源码出处：`packages/react-reconciler/src/ReactFiberFlags.js` + `ReactHookEffectTags.js`
+> （已 WebFetch 实时核对 facebook/react main 分支）
+
+#### fiberFlags（打在 `fiber.flags`，本质是 ReactFiberFlags.js 的常量别名）
+
+| Hooks 里的名字 | 实际常量 | 数值 |
+|---|---|---|
+| `PassiveEffect` | = `Passive` | 2048 |
+| `UpdateEffect` | = `Update` | 4 |
+
+⭐ **确认**：PassiveEffect 就是 Passive，UpdateEffect 就是 Update（useLayoutEffect 复用了 DOM 更新那个 flag）。
+
+#### hookFlags（打在 `effect.tag`，是 ReactHookEffectTags.js 的另一套常量）
+
+| 常量 | 数值 | 含义 |
+|---|---|---|
+| `HookHasEffect` | 1 | 本次要不要跑（开关位）|
+| `HookLayout` | 4 | useLayoutEffect 类型 |
+| `HookPassive` | 8 | useEffect 类型 |
+
+#### effect.tag 最终值（注意：useEffect 和 useLayoutEffect 不一样！）
+
+```
+useEffect 的       effect.tag = HookHasEffect ∪ HookPassive = 1 ∪ 8 = 9
+useLayoutEffect 的 effect.tag = HookHasEffect ∪ HookLayout  = 1 ∪ 4 = 5
+                                              ↑ 差在这一位（8 vs 4）
+```
+
+（这里用 ∪ 表示"按位或"，因为 Markdown 表格里写 `|` 会被当成单元格分隔符截断 —— 踩过这个坑）
+
+⚠️ **易混巧合**：useLayoutEffect 的 fiberFlags 是 `Update`(4)，hookFlags 是 `HookLayout`(4)——**数值都是 4 但是两个不同体系的常量**（一个在 ReactFiberFlags，一个在 ReactHookEffectTags），别当同一个东西。
+
+#### fiber.flags 还有哪些值 + commit 怎么分流
+
+| flag | 数值 | 含义 | commit 处理 |
+|---|---|---|---|
+| `Placement` | 2 | 新插入/移动 DOM | Mutation: insertBefore |
+| `Update` | 4 | DOM 属性更新 / useLayoutEffect | Mutation: setAttribute；Layout: 跑 layoutEffect |
+| `ChildDeletion` | 16 | 有子节点要删 | Mutation: removeChild |
+| `ContentReset` | 32 | 重置文本 | Mutation: 清空 textContent |
+| `Callback` | 64 | 类组件 cDM/cDU | Layout: 调生命周期 |
+| `Ref` | 512 | 绑/卸 ref | Mutation 卸旧 / Layout 绑新 |
+| `Snapshot` | 1024 | getSnapshotBeforeUpdate | BeforeMutation 调用 |
+| `Passive` | 2048 | useEffect | paint 后异步 flushPassiveEffects |
+| `Visibility` | 8192 | Suspense 显隐 | Mutation: 切换显示 |
+
+源码里直接有**分组掩码**证明 commit 三阶段靠 flag 分流：
+
+```
+MutationMask = Placement ∪ Update ∪ ChildDeletion ∪ ContentReset ∪ Ref ∪ ...
+LayoutMask   = Update ∪ Callback ∪ Ref ∪ Visibility
+PassiveMask  = Passive ∪ Visibility ∪ ChildDeletion
+```
+
 
 ⭐ **Q1 答案**：useEffect 和 useLayoutEffect 在源码里调用同一套 `mountEffectImpl` / `updateEffectImpl`，**只传了不同的 fiberFlags（PassiveEffect vs UpdateEffect）和 hookFlags（HookPassive vs HookLayout）**。这两个 flag 决定了 effect 在 commit 哪个阶段、同步还是异步执行。
 
