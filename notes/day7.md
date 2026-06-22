@@ -285,7 +285,70 @@ function areHookInputsEqual(nextDeps, prevDeps) {
 
 ⭐ **Q3 答案**：deps 浅比较发生在 update 阶段的 `updateEffectImpl` 里，调用 `areHookInputsEqual` 用 `Object.is` 逐项比较新旧 deps 数组。相等 → effect 进链表但不打 HookHasEffect（跳过执行）；不等 → 打 HookHasEffect + fiberFlags（本次执行）。
 
+### 4.4 ⭐ 追问：deps 没变进的是哪条链表？Hook 链表每次 render 会变吗？
+
+> 学习者追问（15:14）：① deps 没变时 effect 进的是哪个链表？② Hook 链表只初始化建一次吗，后面 update 还会变吗？
+
+#### ① deps 没变时，effect 两条链表都进
+
+源码 deps 相等分支：
+
+```js
+if (areHookInputsEqual(nextDeps, prevDeps)) {
+  hook.memoizedState = pushSimpleEffect(hookFlags, inst, create, nextDeps);
+  //                   ↑ pushSimpleEffect 照样：1) push 进 updateQueue 环形链表
+  //                                            2) return 给 hook.memoizedState
+  return;   // tag 只有 hookFlags，没有 HookHasEffect
+}
+```
+
+⭐ 所以 **Hook 链表 + effect 链表都进**，区别只在 `tag` 没有 `HookHasEffect` → commit 遍历到它时跳过执行。
+
+**"进链表"和"执行"是两件独立的事**：
+- 进链表 = 保持位置 / 顺序（下次还要按位置比 deps）
+- 执行 = 看 `HookHasEffect` 开关位
+
+#### ② Hook 链表每次 render 都重建（不是只建一次！）
+
+这是大误区。`renderWithHooks` 每次 render 开头会**清空重建**：
+
+```js
+// renderWithHooks 开头
+workInProgress.memoizedState = null;   // ★ Hook 链表清空
+workInProgress.updateQueue = null;     // ★ effect 链表清空
+```
+
+然后组件函数重新执行，每个 hook 调用：
+- **mount**：`mountWorkInProgressHook()` → new 一个 hook 节点
+- **update**：`updateWorkInProgressHook()` → **从 current 树对应位置的旧 hook 克隆一个新节点**到 wIP
+
+```js
+function updateWorkInProgressHook() {
+  const currentHook = ...;   // 从 current.memoizedState 拿对应位置旧 hook
+  const newHook = {          // ★ 克隆成新对象
+    memoizedState: currentHook.memoizedState,
+    baseState: currentHook.baseState,
+    queue: currentHook.queue,
+    next: null,
+  };
+  // 追加到 wIP 的 hook 链表
+  return newHook;
+}
+```
+
+⭐ **核心结论**（和 Day 2 双缓存完全一致）：
+
+| | 每次 render |
+|---|---|
+| Hook 链表**结构** | wIP 上**全新重建**（从 current 克隆一条新链表）|
+| hook 里的**数据**（state / effect 对象 / queue）| 通过克隆**跨 render 保留** |
+
+> **链表结构每次 render 重建，里面的数据通过双缓存克隆延续。**
+
+这也解释了**为什么 Hook 必须顺序稳定**——每次 render 都要按相同顺序从 current 克隆对应位置的 hook，顺序乱了就克隆到错误的旧数据（state 跑到别的 hook 上）。
+
 ---
+
 
 ## 五、cleanup 什么时候存、什么时候跑（Q4）
 
