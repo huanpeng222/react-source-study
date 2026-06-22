@@ -71,12 +71,67 @@ function mountLayoutEffect(create, deps) {
 - **fiberFlags** 打在 `fiber.flags` 上 → commit 阶段靠它知道"这个 fiber 有 passive / layout effect 要处理"
 - **hookFlags** 打在 effect 对象的 `tag` 上 → 区分"这个 effect 是 passive 还是 layout"
 
+### 2.1.5 ⭐ 两个 flag 到底啥意思（接 Day 4 的 fiber.flags 体系）
+
+> 学习者追问（15:31）：这两个 flag 啥意思？其他 hook 有没有？感觉乱。
+
+**先认清：这两个 flag 不是新东西，是 Day 4 `fiber.flags` 体系的延续。**
+
+Day 4 你学过 `fiber.flags`（Placement=2 / Update=4 / Deletion=16 / Ref=512 / Passive=2048…），commit 靠它知道每个 fiber 要干啥。今天两个 flag 就是这套体系：
+
+#### flag 1：fiberFlags —— 打在 `fiber.flags` 上（你 Day 4 认识的那个字段）
+
+```js
+currentlyRenderingFiber.flags |= fiberFlags;   // PassiveEffect 或 UpdateEffect
+```
+
+作用：**粗筛**——告诉 commit"这个组件 fiber 身上有副作用"。配合 Day 4 的 `subtreeFlags` 剪枝，没有就整棵子树跳过。
+
+#### flag 2：hookFlags —— 打在 `effect.tag` 上（今天新的）
+
+```js
+effect.tag = HookHasEffect | hookFlags;   // HookPassive 或 HookLayout
+```
+
+作用：**细分**——commit 遍历 effect 链表时，靠它决定这个 effect 在哪个子阶段跑。
+
+#### 类比
+
+| flag | 类比 |
+|---|---|
+| fiberFlags（fiber.flags）| 大楼门口"本楼有快递"指示牌——commit 决定要不要进这栋楼 |
+| hookFlags（effect.tag）| 每个快递盒上"冷藏/常温"标签——进楼后决定送哪个仓库（Mutation/Layout/异步）|
+
+#### ⭐ 其他 hook 有没有这两个 flag？
+
+| hook | fiberFlags | hookFlags |
+|---|---|---|
+| useEffect | `PassiveEffect` | `HookPassive` |
+| useLayoutEffect | `UpdateEffect` | `HookLayout` |
+| useState / useRef / useMemo / useCallback | ❌ 没有 | ❌ 没有 |
+
+**只有 useEffect / useLayoutEffect 有这两个 flag。**
+
+#### 为什么只有它俩打 flag（核心，记死这句）
+
+> **要不要打 flag，看"产出是 render 阶段用掉，还是要延迟到 commit 阶段执行"。**
+
+| hook | 产出 | 何时用 | 打 flag？ |
+|---|---|---|---|
+| useState | state 值 | render 阶段直接 return | ❌ |
+| useRef | ref 对象 | render 阶段直接 return | ❌ |
+| useMemo | 缓存值 | render 阶段直接 return | ❌ |
+| **useEffect** | 回调 create() | **commit 阶段（DOM 改完后）才跑** | ✅ |
+
+⚠️ **不是"有 cleanup 才打 flag"**——哪怕 effect 没 return cleanup，照样打 flag。打 flag 的原因是**回调执行被推迟到 commit**，cleanup 只是回调的返回值（副作用的一部分），不是原因。
+
 ### 2.2 这两个 flag 决定了"什么时候跑"
 
 | flag | commit 阶段表现（Day 5 学过）|
 |---|---|
 | `HookLayout`（useLayoutEffect）| Layout 子阶段**同步**跑（paint 前）|
 | `HookPassive`（useEffect）| paint 后 **flushPassiveEffects** 异步跑 |
+
 
 ⭐ **Q1 答案**：useEffect 和 useLayoutEffect 在源码里调用同一套 `mountEffectImpl` / `updateEffectImpl`，**只传了不同的 fiberFlags（PassiveEffect vs UpdateEffect）和 hookFlags（HookPassive vs HookLayout）**。这两个 flag 决定了 effect 在 commit 哪个阶段、同步还是异步执行。
 
