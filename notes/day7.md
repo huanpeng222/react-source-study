@@ -347,6 +347,65 @@ function updateWorkInProgressHook() {
 
 这也解释了**为什么 Hook 必须顺序稳定**——每次 render 都要按相同顺序从 current 克隆对应位置的 hook，顺序乱了就克隆到错误的旧数据（state 跑到别的 hook 上）。
 
+### 4.5 ⭐ 追问：克隆是复用对象还是新建？三层复用粒度对比
+
+> 学习者追问（15:20）：Day 2 说 wIP fiber 复用 current fiber 对象，那 hook 对象也复用吗？
+
+**先看源码 `updateWorkInProgressHook`（普通 update 分支）**：
+
+```js
+const newHook: Hook = {                       // ★ new 一个全新对象
+  memoizedState: currentHook.memoizedState,   // 浅拷贝（复制引用/值）
+  baseState: currentHook.baseState,
+  baseQueue: currentHook.baseQueue,
+  queue: currentHook.queue,                   // ★ 和 currentHook 共享同一个 queue
+  next: null,                                 // 唯一被重置
+};
+```
+
+⭐ **结论**：hook 节点是**新建外壳 + 浅拷贝字段**，`newHook !== currentHook`。**和 Fiber 的"复用对象"策略不同。**
+
+#### Hook 层 vs Fiber 层复用策略对比
+
+| 层级 | 复用什么 | 怎么做 | 出处 |
+|---|---|---|---|
+| **Fiber 对象** | **复用对象本身** | `createWorkInProgress` 拿 `current.alternate`，改字段不 new（两对象轮流坐庄）| Day 2 §4.7 |
+| **Hook 外壳** | **新建对象 + 浅拷贝字段** | `updateWorkInProgressHook` 每次 `new newHook` | Day 7 |
+
+#### 为什么 hook 不像 fiber 那样复用对象？关键在 queue 共享
+
+```js
+queue: currentHook.queue,   // ★ newHook 和 currentHook 共享同一个 queue 对象
+```
+
+- **hook 外壳**：每次 render 新建（轻量，5 个字段，无所谓）
+- **queue（update 队列）**：current 和 wIP **共享同一个**
+
+这就解释了 Day 6 的"**dispatch 引用稳定**"：queue 共享 → `queue.dispatch`（setN）跨 render 永远同一引用。
+
+#### 🎯 三层复用粒度速查（把 Day 2 + 6 + 7 串起来）
+
+```
+Fiber 对象      → 复用本身（alternate 两个轮流坐庄）          ← Day 2
+Hook 外壳       → 每次 render 新建（浅拷贝字段）              ← Day 7
+Hook.queue      → current/wIP 共享同一个（dispatch 才稳定）   ← Day 6
+effect 对象     → 每次 render 新建（push 进新 updateQueue）   ← Day 7
+effect.inst     → 复用（cleanup 要跨 render 存活）            ← Day 7
+```
+
+⭐ **规律（一句话记死）**：
+> **"需要跨 render 存活的状态"（queue / inst）被共享复用；"每次 render 重新组织的结构"（fiber 链 / hook 外壳 / effect 链）被重建。**
+
+#### 易混点对照
+
+| 对象 | 跨 render 是同一个吗 |
+|---|---|
+| current fiber ↔ wIP fiber | 两个对象轮流（通过 alternate）|
+| hook 外壳（前后两次 render）| ❌ 不同对象（新建）|
+| hook.queue | ✅ 同一个（共享）|
+| effect 外壳（前后两次 render）| ❌ 不同对象（新 push）|
+| effect.inst（destroy 容器）| ✅ 同一个（复用，cleanup 存活）|
+
 ---
 
 
