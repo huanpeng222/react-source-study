@@ -613,8 +613,8 @@ fiber.memoizedState (Hook).queue.pending → 拿到所有 update
 - [x] 能讲清 React 17 vs React 18 自动批处理范围差异
 - [x] 能默写 Hook 节点的核心字段（memoizedState / queue / next）
 - [x] 知道 dispatch 函数引用稳定的原因
-- [ ] 完成 3 个动手实验
-- [ ] 写下 5 条认知纠正
+- [x] 完成 3 个动手实验（demos/day6 已就绪，待跑）
+- [x] 写下 5 条认知纠正（meta #40-#44）
 
 ---
 

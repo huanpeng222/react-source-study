@@ -157,5 +157,24 @@
 
 ---
 
+## W2 Day 6（useState 源码）
+
+40. **我以为** `setN(n+1)` 和 `setN(prev=>prev+1)` 只是写法不同效果一样。
+    **其实** action 一个存值、一个存函数。同步多次调用时，值更新被同闭包锁定互相覆盖（3 次只 +1），函数式 prev 拿上次 reduce 结果链式累积（3 次到 3）。
+
+41. **我以为** Hook 的 `memoizedState` 存 action、`queue` 存函数。
+    **其实** 反了。`memoizedState` = 当前 state 的**值**；`queue` = update 队列**容器**（含 pending / dispatch）；`action` 在 **update 节点**上，不在 hook 上。（源码 `packages/react-reconciler/src/ReactFiberHooks.js`）
+
+42. **我以为** 单次 `setN(n+1)` 也会暴露闭包陷阱。
+    **其实** 闭包陷阱只在"同一事件里多次 setN"或"异步引用 n"时暴露。单次同步调用每次点击之间隔着一次 render，闭包自然刷新，所以正常 +1。`console.log(n)` 读到旧值才是闭包的体现，但它不影响 setState。
+
+43. **我以为** `useState(expensiveCompute())` vs `useState(() => expensiveCompute())` 的差异在 useState 内部。
+    **其实** 根源是 **JS 函数参数立即求值**——`expensiveCompute()` 在 useState 被调用之前就跑了，useState 控制不了。前者每次 render 都跑（即使 update 阶段结果被忽略），后者只 mount 跑一次。
+
+44. **我以为** dispatch（setN）每次 render 重新创建。
+    **其实** mount 时 `bind` 创建一次缓存进 `queue.dispatch`，update 阶段直接复用同一引用 → 引用永远稳定 → 不用写进 useEffect deps。
+
+---
+
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
 

@@ -13,7 +13,7 @@
 | W1 | D3 | Reconcile diff 算法 | ✅ |
 | W1 | D4 | beginWork / completeWork | ✅ |
 | W1 | D5 | commit 阶段 | ✅ |
-| W2 | D6 | Hooks 实现原理：useState | ⏳ |
+| W2 | D6 | Hooks 实现原理：useState | ✅ |
 
 完整路线见 [`meta/roadmap.md`](./meta/roadmap.md)。
 
