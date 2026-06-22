@@ -133,6 +133,67 @@ hook.memoizedState = pushSimpleEffect(...);   // ★ 返回的 effect 也存进 
 - **Hook 链表**：按调用顺序索引（update 时 `currentHook.memoizedState` 拿上次的 effect 比 deps）
 - **effect 链表**：commit 阶段直接遍历它执行（不用走整个 Hook 链表，只走有 effect 的）
 
+### 3.2.5 ⭐ 关键澄清：两条链表存的是"同一个 effect 对象"
+
+> 学习者追问（15:09）：两条链表里各自的 effect 有啥区别？为啥 effect 跟其他 hook 不一致？
+
+**第一个误解先消除：两条链表存的不是两份 effect，是同一个对象被引用两次。**
+
+```
+        ┌──────────────────────────┐
+        │  effect 对象（内存中只有1个）│
+        │  { tag, create, deps,     │
+        │    inst:{destroy}, next } │
+        └──────────────────────────┘
+            ↑                    ↑
+   hook.memoizedState    updateQueue 环形链表的一个节点
+   （引用它）              （引用它）
+```
+
+源码（`mountEffectImpl`）：
+
+```js
+hook.memoizedState = pushSimpleEffect(...);
+//                   ↑ pushSimpleEffect 内部把 effect push 进 updateQueue 环形链表，
+//                     并 return 这个 effect → 存进 hook.memoizedState
+//                   → 同一个 effect，两处引用
+```
+
+所以**不存在"两条链表里的 effect 有什么区别"**——它们指向同一个对象。
+
+#### 那为什么要两个引用入口？因为两条链表"遍历方式"完全不同
+
+| | Hook 链表 | updateQueue effect 环形链表 |
+|---|---|---|
+| 串了谁 | **所有 hook**（useState/useRef/useEffect…）| **只串 useEffect/useLayoutEffect** |
+| 顺序 | 严格按调用顺序（位置敏感）| 按 push 顺序（环形）|
+| 谁来遍历 | **render 阶段**：renderWithHooks 按位置走，拿上次 effect 比 deps | **commit 阶段**：commitHookEffectList 直接遍历执行 create/destroy |
+| 目的 | "我是第几个 hook，上次的我在哪"——**身份索引** | "这个组件有哪些副作用要跑"——**执行清单** |
+
+⭐ **一句话**：
+- Hook 链表回答 **"render 时，这个 effect 对应上次哪个 effect（好比 deps）"**
+- effect 链表回答 **"commit 时，这个组件要执行哪些副作用（不用翻 useState/useRef 那些无关 hook）"**
+
+#### 为什么 effect 跟其他 hook 不一致（要多一条链表）
+
+因为 **effect 是唯一需要"延迟到 commit 阶段执行"的 hook**：
+
+| hook | 值在哪用 | 要不要延迟到 commit 跑 |
+|---|---|---|
+| useState | render 阶段直接返回 state | ❌ 不需要 |
+| useRef | render 阶段直接返回 ref 对象 | ❌ 不需要 |
+| useMemo | render 阶段直接返回缓存值 | ❌ 不需要 |
+| **useEffect/useLayoutEffect** | **回调要在 DOM 变更后才能跑** | ✅ **必须延迟到 commit** |
+
+useState/useRef/useMemo 的"产出"在 render 阶段就用掉了，**不需要 commit 阶段再回头找它们**。
+但 effect 的 `create()` 必须等 DOM 改完才能跑（要操作真实 DOM / 绑事件 / 请求数据）。
+
+如果没有 effect 链表，commit 阶段想找"哪些 hook 是 effect"，就得**遍历整条 Hook 链表，挨个判断 tag**——组件有 20 个 useState、2 个 useEffect 时，要扫 22 个才能挑出 2 个。
+
+有了 effect 环形链表，commit 阶段**直接遍历它，里面全是 effect**，零浪费。
+
+⭐ **本质**：effect 链表是一条"**给 commit 阶段用的快捷执行清单**"，把散落在 Hook 链表里的副作用单独串出来。这就是为什么只有 effect 有第二条链表，其他 hook 没有。
+
 ### 3.3 effect 链表是环形的
 
 源码 `pushEffectImpl`：
