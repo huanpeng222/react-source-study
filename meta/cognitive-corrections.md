@@ -195,5 +195,24 @@
 
 ---
 
+## Day 8（useRef / useMemo / useCallback）
+
+50. **我以为** useRef 的 `{current}` 盒子存在"全局"，所以稳定。
+    **其实** 存在**该组件 fiber 的 Hook 链表节点**上（hook.memoizedState），不是全局——全局会导致同组件多实例共用一个 ref 串台。稳定的真因：updateRef 一行 `return hook.memoizedState`，配合三层复用（外壳浅拷贝指向同一盒子），从不新建。
+
+51. **我以为** 改 ref.current React 会悄悄记录等下次用。
+    **其实** `ref.current=x` 就是普通对象属性赋值，React 无监听/无 dispatch 通路 → 不调度 render。对比 setN 有 dispatch 会 scheduleUpdateOnFiber。结果：ref 值立即变，但视图不变。
+
+52. **我以为** useMemo 缓存值存在 deps 里。
+    **其实** memoizedState 是二元组 `[value, deps]`，缓存值在 `[0]`，deps 在 `[1]` 仅作下次比较依据。useRef 没有 deps，直接存 `{current}`。
+
+53. **我以为** useMemo 和 useCallback 是两套实现。
+    **其实** 同一套（deps 浅比较 + memoizedState 二元组），唯一区别：useMemo 存 `create()` 的结果，useCallback 存函数本身。`useCallback(fn,d) ≡ useMemo(()=>fn,d)`。
+
+54. **我以为** useCallback 单独用就能提速。
+    **其实** useCallback 的价值是让传给子组件的函数引用稳定，从而让子组件 React.memo 浅比较命中 bailout。不配 memo 基本没意义；deps 放新对象则永久失效（白写更慢）。
+
+---
+
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
 

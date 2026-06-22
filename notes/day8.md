@@ -324,14 +324,14 @@ render 阶段（beginWork → renderWithHooks → 执行你的函数组件）
 
 ## 九、Day 8 验收清单
 
-- [ ] 能说出 useRef mount/update 源码（update 就一行 return）
-- [ ] 能解释 ref 跨 render 稳定的原因（浅拷贝引用同一个盒子）
-- [ ] 能解释改 ref.current 为何不 render（普通赋值，无 dispatch 通路）
-- [ ] 能说出 useMemo / useCallback 的唯一区别（存结果 vs 存函数）
-- [ ] 能默写 areHookInputsEqual（Object.is 逐项比 deps）
-- [ ] 能解释"deps 放新对象导致 memo 失效"的根因
-- [ ] 完成 3 个动手实验
-- [ ] 写下 5 条认知纠正
+- [x] 能说出 useRef mount/update 源码（update 就一行 return）
+- [x] 能解释 ref 跨 render 稳定的原因（浅拷贝引用同一个盒子）
+- [x] 能解释改 ref.current 为何不 render（普通赋值，无 dispatch 通路）
+- [x] 能说出 useMemo / useCallback 的唯一区别（存结果 vs 存函数）
+- [x] 能默写 areHookInputsEqual（Object.is 逐项比 deps）
+- [x] 能解释"deps 放新对象导致 memo 失效"的根因
+- [x] 完成 3 个动手实验
+- [x] 写下 5 条认知纠正
 
 ---
 
