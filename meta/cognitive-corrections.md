@@ -176,5 +176,24 @@
 
 ---
 
+## W2 Day 7（useEffect / useLayoutEffect 源码）
+
+45. **我以为** useEffect 和 useLayoutEffect 是两套不同实现。
+    **其实** 调同一套 mountEffectImpl/updateEffectImpl，只差 fiberFlags（Passive2048 vs Update4）+ hookFlags（HookPassive8 vs HookLayout4）。（源码 ReactFiberHooks.js + ReactFiberFlags.js + ReactHookEffectTags.js）
+
+46. **我以为** effect 在两条链表里是两份拷贝。
+    **其实** 同一个 effect 对象被两处引用——hook.memoizedState（比 deps 用）+ fiber.updateQueue 环形链表（commit 执行用）。effect 多一条链表，因为它是唯一需延迟到 commit 执行的 hook。
+
+47. **我以为** deps 比较是比整个数组对象引用。
+    **其实** areHookInputsEqual 用 Object.is 逐项比每个元素。`[obj]` 每次新建引用变 → 每次重跑（要 useMemo）。HookHasEffect 是开关位：deps 没变 effect 仍进链表只是不跑。
+
+48. **我以为** cleanup 存在 hook.memoizedState。
+    **其实** 存在 effect.inst.destroy，隔两层。单独放 inst 是为了让 destroy 跨 render 存活（hook 外壳每次新建，inst 复用）。
+
+49. **我以为** hook 像 fiber 一样复用对象。
+    **其实** hook 外壳每次 render 新建（updateWorkInProgressHook 浅拷贝字段，newHook !== currentHook），只有 queue/inst 共享。三层复用规律：跨 render 存活的状态(queue/inst)共享，每次重组的结构(fiber链/hook外壳/effect链)重建。
+
+---
+
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
 

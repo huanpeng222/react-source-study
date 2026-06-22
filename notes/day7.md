@@ -387,21 +387,36 @@ deps 变 → 打 fiberFlags(Passive) + effect.tag(HookHasEffect ∪ HookPassive)
 
 ---
 
-## 十、我之前以为 …，其实是 …（待跟练后回填）
+## 十、我之前以为 …，其实是 …（5 条认知纠正）
 
-（学完后回填 5 条）
+1. **我以为** useEffect 和 useLayoutEffect 是两套不同实现。
+   **其实** 调用同一套 `mountEffectImpl`/`updateEffectImpl`，只差 fiberFlags（Passive vs Update）+ hookFlags（HookPassive vs HookLayout）两个 flag。
+
+2. **我以为** effect 在 Hook 链表和 effect 链表里是两份。
+   **其实** 是同一个 effect 对象被两处引用——memoizedState（比 deps 用）+ updateQueue 环形链表（commit 执行用）。
+
+3. **我以为** deps 比较是比整个数组对象的引用。
+   **其实** 是 `Object.is` 逐项比每个元素。基本类型比值、引用类型比引用——所以 `[obj]` 每次新建引用变就每次重跑。
+
+4. **我以为** cleanup 存在 hook.memoizedState。
+   **其实** 存在 `effect.inst.destroy`，隔两层（memoizedState → effect → inst.destroy）。单独放 inst 是为了让 destroy 跨 render 存活（hook 外壳每次新建，inst 复用）。
+
+5. **我以为** hook 像 fiber 一样复用对象。
+   **其实** hook 外壳每次 render 新建（浅拷贝字段），只有 queue/inst 共享复用。规律：跨 render 存活的状态共享，每次重组的结构重建。
+
+> 这 5 条已追加到 `meta/cognitive-corrections.md`（#45-#49）。
 
 ---
 
 ## 十一、Day 7 验收清单
 
-- [ ] 能说出 useEffect / useLayoutEffect 源码差异（fiberFlags + hookFlags 两个 flag，及确切数值）
-- [ ] 能讲清两条链表是同一 effect 对象的两个引用、各自遍历方式
-- [ ] 能解释 deps 用 Object.is 逐项比 + HookHasEffect 开关位
-- [ ] 能说清 cleanup 存在 inst.destroy、存/跑的时机
-- [ ] 能讲三层复用粒度（fiber 复用 / hook 外壳新建 / queue 共享）
-- [ ] 完成 3 个动手实验
-- [ ] 写下 5 条认知纠正
+- [x] 能说出 useEffect / useLayoutEffect 源码差异（fiberFlags + hookFlags 两个 flag，及确切数值）
+- [x] 能讲清两条链表是同一 effect 对象的两个引用、各自遍历方式
+- [x] 能解释 deps 用 Object.is 逐项比 + HookHasEffect 开关位
+- [x] 能说清 cleanup 存在 inst.destroy、存/跑的时机
+- [x] 能讲三层复用粒度（fiber 复用 / hook 外壳新建 / queue 共享）
+- [ ] 完成 3 个动手实验（demos/day7 已就绪）
+- [x] 写下 5 条认知纠正（meta #45-#49）
 
 ---
 
