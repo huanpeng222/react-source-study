@@ -161,23 +161,71 @@ lanes  = 0b0010100   (20)
 
 ## 三、一次更新如何被分配 Lane
 
-### 3.1 入口：requestUpdateLane
+### 3.1 入口：requestUpdateLane（lane 值到底怎么算出来的）
 
-`setState` → `dispatchSetState` → `requestUpdateLane(fiber)` 决定这次更新走哪条车道。逻辑（`ReactFiberWorkLoop.js`）：
+`setState` → `dispatchSetState` → `requestUpdateLane(fiber)`（`ReactFiberWorkLoop.js` L810）决定这次更新走哪条车道。**lane 不是"存"出来的，是触发时按上下文当场算的**，从上到下短路判断：
 
+```js
+function requestUpdateLane(fiber) {
+  // ① legacy（非并发）模式：根本不分车道，永远 SyncLane         L813
+  if (!disableLegacyMode && (mode & ConcurrentMode) === NoMode) return SyncLane;
+
+  // ② render 阶段里又 setState（非官方支持）：借用当前 wip 的车道  L829
+  if ((executionContext & RenderContext) !== NoContext && wipRenderLanes !== NoLanes)
+    return pickArbitraryLane(workInProgressRootRenderLanes);
+
+  // ③ 在 startTransition 回调里：领一条 TransitionLane             L853 上
+  const transition = requestCurrentTransition();
+  if (transition !== null) return requestTransitionLane(transition);
+
+  // ④ 默认：看"当前事件优先级"翻译成 lane                          L853
+  return eventPriorityToLane(resolveUpdatePriority());
+}
 ```
-1. 如果在 startTransition 回调里 → 分配一条 TransitionLane（低优先级）
-2. 否则看当前事件类型（getCurrentEventPriority）：
-   - 离散事件（click / keydown / input）→ SyncLane（最高）
-   - 连续事件（scroll / mousemove / drag）→ InputContinuousLane
-   - 其他 → DefaultLane
+
+**④ 的映射是固定常量**（`ReactEventPriorities.js` L25-28 + `eventPriorityToLane` L51）：
+
+| 事件类型 | EventPriority | → Lane |
+|---|---|---|
+| 离散 click / input / keydown | DiscreteEventPriority | `SyncLane`(2) |
+| 连续 scroll / mousemove | ContinuousEventPriority | `InputContinuousLane` |
+| setTimeout / 网络回调 | DefaultEventPriority | `DefaultLane`(32) |
+| 空闲 / offscreen | IdleEventPriority | `IdleLane` |
+
+**③ 的 TransitionLane 怎么领**（`ReactFiberLane.js` `claimNextTransitionUpdateLane`）——唯一带"状态记忆"的分配，靠一个轮转计数器让相邻 transition 错开车道：
+
+```js
+const lane = nextTransitionUpdateLane;
+nextTransitionUpdateLane <<= 1;                 // 左移一位 = 下一条车道
+if ((nextTransitionUpdateLane & TransitionUpdateLanes) === NoLanes)
+  nextTransitionUpdateLane = TransitionLane1;    // 用完一圈绕回开头
+return lane;
 ```
 
-⭐ **关键认知**：优先级**不是你手动指定的**，是 React 根据"触发更新的上下文"自动判定的。唯一的手动入口是 `startTransition` / `useDeferredValue`——主动降级为低优先级。
+⭐ **关键认知**：优先级**不是你手动指定的**，是 React 按"触发更新的运行上下文"自动判定的（输入只有三个：渲染模式 / 是否在 transition 里 / 当前事件类型）。唯一的手动入口是 `startTransition` / `useDeferredValue`——主动降级为低优先级。
 
-### 3.2 root 上记录待处理 lanes
+### 3.2 lane 算出来后存哪：每个 fiber 都有，而且是两个字段
 
-更新入队后，`root.pendingLanes |= lane`（合并这条车道）。调度器靠 `getNextLanes(root)` 从 `pendingLanes` 里挑出"本次要渲染的那一批车道"（renderLanes）——**优先挑最高优先级**。
+构造 FiberNode 时就初始化（`ReactFiber.js` L174-175），所以**每个 fiber 都有，平时都是 `NoLanes`(0) = 没活**：
+
+```js
+this.lanes = NoLanes;       // 本节点自己有没有待处理 update
+this.childLanes = NoLanes;  // 它的子树里有没有待处理 update（自己不一定有）
+```
+
+| 字段 | 含义 | 谁来写 |
+|---|---|---|
+| `fiber.lanes` | **本节点自己**欠的 lane | `markUpdateLaneFromFiberToRoot` 给 sourceFiber 写；hook 入队写 |
+| `fiber.childLanes` | **后代子树**欠的 lane（冒泡汇总） | 冒泡时沿途父节点累加；completeWork `bubbleProperties` 回溯汇总 |
+
+一次 setState 发生时（`markUpdateLaneFromFiberToRoot` `ReactFiberConcurrentUpdates.js` L195-208）：
+1. 触发的 fiber → `lanes = mergeLanes(lanes, lane)`；
+2. 沿 `return` 链到 root，每个父 fiber → `childLanes = mergeLanes(childLanes, lane)`（**含 alternate 一起标**，双缓存两棵树 lane 要同步）；
+3. root → `root.pendingLanes |= lane`。
+
+这正是 beginWork 能靠 `includesSomeLane(renderLanes, fiber.childLanes)` 判断"这棵子树要不要往下走"的原因——`childLanes` 是 0 就整棵 bailout 跳过。
+
+> ⚠️ `createWorkInProgress` 复用 alternate 时会 `wip.lanes = current.lanes` / `wip.childLanes = current.childLanes` 一起拷（`ReactFiber.js` L388-389），这就是为什么标记时必须给 alternate 也标一遍。
 
 > 🔍 微检查点 3：在 `onClick` 里直接 `setN(1)`，和在 `startTransition(() => setN(1))` 里，这两次更新被分到的 lane 一样吗？
 
@@ -345,21 +393,45 @@ root.pendingLanes |= lane
 
 ## 九、我之前以为 …，其实是 …（5 条认知纠正，跟练后回填）
 
-（学完后回填）
+1. **我以为** startTransition 是"在 setState 的那个 fiber 单元内打上低优先级标"；**其实是** startTransition 只设置一个**全局 transition 上下文**（`requestCurrentTransition()` 能取到），真正打标发生在 `requestUpdateLane` 里检测到 `transition !== null` → 领一条 TransitionLane，而这条 lane 最终是标在 **update 对象上（`update.lane`）**，不是"fiber 单元内"。
+
+2. **我以为** `isSubsetOfLanes(a, b)` 判断"a 是不是 b 的子集"；**其实是反的**——签名是 `isSubsetOfLanes(set, subset)`，`(set & subset) === subset`，判断**第二个参数 subset 是否为第一个参数 set 的子集**。记法：第一个是"大池子 renderLanes"，第二个是"被检查的小东西 update.lane"。
+
+3. **我以为** transition 的"低优先级"体现在"commit 时跳过 update"；**其实**低优先级体现在**调度 + 渲染阶段**：① `getNextLanes` 选批次时排在 SyncLane 之后先不被选；② 渲染中可被高优先级打断、整棵 wIP 丢弃重做。到 commit 阶段已是"确定要提交的一批",不存在跳过 update。
+
+4. **我以为** lane 是某处算好存起来的固定值；**其实** lane 是**每次更新触发时由 `requestUpdateLane` 按上下文当场算的**（输入=渲染模式/是否在transition/当前事件类型），只有 `claimNextTransitionUpdateLane` 那个 `<<=1` 轮转计数器带状态记忆。
+
+5. **我以为** 只有"有活的"fiber 才有 lane 字段；**其实**每个 FiberNode 构造时就有 `lanes` 和 `childLanes` 两个字段（初始 `NoLanes=0`），且语义不同：`lanes`=自己欠的，`childLanes`=子树欠的（冒泡汇总），后者是 beginWork bailout 整棵跳过的依据。
+
+### 9.5 入场自测 / 微检查点对答（2026-06-23 本人作答 → 教练判定）
+
+| 题 | 判定 | 关键纠正 |
+|---|---|---|
+| Q1 lane 是什么 | ✅ | bitmask 一位/批；O(1) 集合运算 |
+| Q2 startTransition 怎么降级 | ⚠️ | 标在 update 上、设全局上下文，非"fiber 单元内打标"（见纠正1） |
+| Q3 低优先级 wIP 怎么办 | ✅ | 丢弃重做 |
+| Q4 useDeferredValue vs useTransition | ✅ | 包值 vs 包动作 |
+| 检查点2 `isSubsetOfLanes(0b110,0b010)` | ⚠️ | 结果 true 对，子集方向反了（见纠正2） |
+| 检查点3 onClick vs transition | ✅ | Sync vs TransitionLane，不同 |
+| 检查点4 打断后暂停/丢弃 | ✅ | 丢弃重做，靠 commit 切 current 指针 |
+| 检查点5 回调同步? 低优先级体现在哪 | ⚠️ | 回调同步✅；但体现在调度/渲染阶段非 commit（见纠正3） |
+| 检查点6 改不到 setState 用啥 | ✅ | useDeferredValue |
+
+> 成绩：6 对 3 偏。三个偏差都属"机制定位"（标在哪 / 谁是子集 / 在哪个阶段让步），概念方向均正确。
 
 ---
 
 ## 十、Day 10 验收清单
 
-- [ ] 能说清 Lane 相比 expirationTime 的优势（位掩码 = 可做集合运算 + 表达一批更新）
-- [ ] 知道"bit 越靠右优先级越高"，SyncLane > DefaultLane > TransitionLane > IdleLane
-- [ ] 能默写 5 个工具函数（getHighestPriorityLane / includesSomeLane / isSubsetOfLanes / mergeLanes / removeLanes）
-- [ ] 能解释 `lanes & -lanes` 为什么取最低位
-- [ ] 能说清 workLoopSync vs workLoopConcurrent 的唯一区别（shouldYield）
-- [ ] 能解释高优先级插队时低优先级 wIP 树被"丢弃重做"而非暂停续跑
-- [ ] 能讲清 useTransition（包动作）vs useDeferredValue（包值）的区别
+- [x] 能说清 Lane 相比 expirationTime 的优势（位掩码 = 可做集合运算 + 表达一批更新）
+- [x] 知道"bit 越靠右优先级越高"，SyncLane > DefaultLane > TransitionLane > IdleLane
+- [x] 能默写 5 个工具函数（getHighestPriorityLane / includesSomeLane / isSubsetOfLanes / mergeLanes / removeLanes）
+- [x] 能解释 `lanes & -lanes` 为什么取最低位
+- [x] 能说清 workLoopSync vs workLoopConcurrent 的唯一区别（shouldYield）
+- [x] 能解释高优先级插队时低优先级 wIP 树被"丢弃重做"而非暂停续跑
+- [x] 能讲清 useTransition（包动作）vs useDeferredValue（包值）的区别
 - [ ] 完成 3 个动手实验
-- [ ] 写下 5 条认知纠正
+- [x] 写下 5 条认知纠正
 
 ---
 

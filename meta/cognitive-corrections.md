@@ -239,5 +239,21 @@
 
 ---
 
+## Day 10 · Lane 优先级模型 + 并发渲染
+
+62. **我以为** startTransition 是"在 setState 的那个 fiber 单元内打上低优先级标"。
+    **其实** startTransition 只设置一个**全局 transition 上下文**（`requestCurrentTransition()` 取），真正打标在 `requestUpdateLane`（`ReactFiberWorkLoop.js` L810）检测到 `transition !== null` → 领一条 TransitionLane，而这条 lane 最终标在 **update 对象（`update.lane`）** 上，不是 fiber 上。（Day10 入场自测 Q2 纠错）
+
+63. **我以为** `isSubsetOfLanes(a, b)` 判断"a 是不是 b 的子集"。
+    **其实反了**——签名 `isSubsetOfLanes(set, subset)`，`(set & subset) === subset`，判断**第二个参数 subset 是否为第一个参数 set 的子集**。`isSubsetOfLanes(0b110, 0b010)=true` 因为 0b010 是 0b110 的子集。记法：第一个是大池子 renderLanes，第二个是被检查的 update.lane。（Day10 微检查点2 纠错）
+
+64. **我以为** transition 的"低优先级"体现在"commit 时跳过 update"。
+    **其实**体现在**调度 + 渲染阶段**：① getNextLanes 选批次时排在 SyncLane 之后先不被选；② 渲染中可被高优先级打断、整棵 wIP 丢弃重做。到 commit 已是"确定要提交的一批",不存在跳过 update。回调本身是同步执行的。（Day10 微检查点5 纠错）
+
+65. **我以为** lane 是某处算好存起来的固定值、只有"有活的"fiber 才有。
+    **其实** lane 是每次更新触发时由 `requestUpdateLane` 按上下文当场算的；且**每个 FiberNode 构造时就有 `lanes`+`childLanes` 两字段**（`ReactFiber.js` L174-175，初始 NoLanes=0），`lanes`=自己欠的、`childLanes`=子树欠的（冒泡汇总，是 beginWork bailout 整棵跳过的依据）。
+
+---
+
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
 
