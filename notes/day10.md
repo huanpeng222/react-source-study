@@ -386,8 +386,9 @@ root.pendingLanes |= lane
 
 ## 八、动手实验
 
-详见 `demos/day10/README.md`，3 个实验（K1/K2/K3）。
-⚠️ 所有"预期"均本地实测得出（见 demos/VERIFY_HARNESS.md），并标注 React 版本。
+详见 `demos/day10/README.md`，3 个实验（K1 自动批处理 / K2 useTransition isPending / K3 useDeferredValue 值滞后），全部本地 jsdom + react@19.2.7 实测，原始输出见 `demos/day10/observations.md`。
+
+⚠️ 诚实边界：jsdom + node 无真实时间分片，"低优先级 wIP 被打断丢弃重做"观察不到，故不做实验、不编造（只在 §4 讲源码机制）。
 
 ---
 
@@ -430,7 +431,7 @@ root.pendingLanes |= lane
 - [x] 能说清 workLoopSync vs workLoopConcurrent 的唯一区别（shouldYield）
 - [x] 能解释高优先级插队时低优先级 wIP 树被"丢弃重做"而非暂停续跑
 - [x] 能讲清 useTransition（包动作）vs useDeferredValue（包值）的区别
-- [ ] 完成 3 个动手实验
+- [x] 完成 3 个动手实验（K1/K2/K3，本地实测）
 - [x] 写下 5 条认知纠正
 
 ---
