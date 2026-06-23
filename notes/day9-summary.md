@@ -88,6 +88,17 @@ if (oldProps === newProps && !hasScheduledUpdate() && !hasScheduledContext())
 
 "Context 性能优化"几乎总和 memo 一起谈——单独 context 机制阻止不了默认全渲染。
 
+### 追问 3 续：可我项目里没写 memo，改 inner 也只渲染内层 B（截图实证）
+
+真正的分水岭是 **element 的 props 引用是否跨 render 稳定**（源码 `ReactFiberBeginWork.js` 的 `beginWork`：`oldProps !== newProps` 才必渲染）。`React.memo` 只是稳定引用的手段之一。
+
+- 裸 JSX、未开编译器 → App 每次 render 重建 element → props 新引用 → A/C bailout 失败 → **3 行全渲染**
+- **React Compiler（Vite + React 19 常开）自动缓存 element** → A/C props 引用稳定 → bailout 成功 → **改 inner 只 1 行 inner!**（等同手写 memo 效果）
+
+实测（jsdom react@19.2）：裸 JSX→3 行；用 `useMemo` 缓存 element 模拟编译器→改 inner 1 行 / 改 outer 2 行 / toggle 0 行，**与真实项目截图完全一致**。
+
+⭐ 所以"没写 memo 也只渲染内层"不是矛盾，是编译器替你 memo 了 element。查 `vite.config`/`package.json` 是否有 `babel-plugin-react-compiler` 可证实。
+
 ## 5 句口诀
 
 1. useContext 不建节点、不存数据、每次 render 直接读

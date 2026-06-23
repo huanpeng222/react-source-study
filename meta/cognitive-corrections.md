@@ -234,6 +234,9 @@
 60. **我以为** Context 的"只渲染消费者"精准性，在普通组件里就能观察到。
     **其实** 必须配合 React.memo 才看得到。没 memo 时"父重渲染→子每次新 props 引用→bailout 失败→全部子组件渲染"这个粗行为会盖住 context 的精准标记，点任何按钮（哪怕和 context 无关的 setState）三个消费者都渲染，行为看起来一样。只有给消费者包 memo，propagateContextChanges 的"只标记该 Provider 子树内消费者"才显现。所以"Context 性能"几乎总和 memo 一起谈。（本认知由 Day9 J1 实验实测纠错得出）
 
+61. **我以为** "没写 React.memo 就一定三个消费者全渲染"。
+    **其实** 真正的分水岭是 **element 的 props 引用是否跨 render 稳定**（`ReactFiberBeginWork.js` 的 `beginWork`：`oldProps !== newProps` 才 didReceiveUpdate=true）。`React.memo` 只是"稳定 props 引用"的一种手段；**React Compiler（Vite+React19 常开）会自动缓存 element → props 引用稳定**，效果等同 memo。所以在开了编译器的项目里，**不写 memo 也只渲染内层消费者（改 inner 只打印 1 行 inner!）**——我之前裸 jsdom 测试没缓存 element 才得出"全渲染"，误判了。实测：react@19 裸 JSX→3 行；缓存 element（useMemo 模拟编译器）→1 行 inner! / 2 行 outer! / toggle 0 行，与学习者真实项目截图一致。（Day9 实测纠错）
+
 ---
 
 <!-- 后续 Day 的认知纠正继续追加在这里 -->

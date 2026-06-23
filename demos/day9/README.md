@@ -1,8 +1,39 @@
 # Day 9 实验：useContext + Provider + dependencies
 
 > 代码贴进 Vite + React playground
-> ⚠️ 核心教训：Context "只渲染消费者" 的精准性，**必须配合 React.memo 才能观察到**。
-> 没有 memo 时，"父重渲染 → 子默认全渲染" 会盖住 context 机制。
+> ⚠️ 核心教训：Context "只渲染消费者" 的精准性，能否被观察到，取决于 **子组件 element 的 props 引用是否跨 render 稳定**。
+
+---
+
+## ⭐ 先讲清"分水岭"（源码基准，已实测验证）
+
+bailout 判断在 `packages/react-reconciler/src/ReactFiberBeginWork.js` 的 `beginWork` 开头：
+
+```js
+if (oldProps !== newProps || hasLegacyContextChanged()) {
+  didReceiveUpdate = true;   // ★ props 引用变了 → 必须重渲染（bailout 失败）
+} else {
+  // props 引用没变 → 再看 lanes，没标记就 bailout（跳过）
+}
+```
+
+所以"改 inner 时几个 DeepChild 重渲染"的**真正分水岭，是 `<DeepChild/>` 这个 element 的 props 引用稳不稳定**，不是"有没有写 memo"：
+
+| 场景 | A/C 的 props 引用 | 改 inner 的结果 |
+|---|---|---|
+| **裸 JSX，无任何缓存**（纯手写 + 未开编译器）| App 每次 render 都 `createElement` → **新引用** | `oldProps !== newProps` → A/C bailout 失败 → **3 个全渲染** |
+| **手写 `React.memo(DeepChild)`** | memo 浅比较 `tag` 相等 → 视为稳定 | A/C bailout 成功 → **只 B 渲染** |
+| **React Compiler 自动 memo**（Vite + React 19，`.tsx` 默认常开）| 编译器把 element 缓存 → **引用稳定** | A/C bailout 成功 → **只 B 渲染** |
+
+⭐ **实测结论**（jsdom 跑 react@19.2）：
+> - 裸 JSX（element 每次新建）→ 改 inner = **3 行** `outer / inner! / outer`
+> - element 引用被缓存（模拟编译器 / 等价 memo）→ 改 inner = **1 行** `inner!`，改 outer = **2 行**，toggle = **0 行**
+
+如果你在真实 Vite + React 19 项目里"没写 memo 也只看到 1 行 `inner!`"，那是 **React Compiler 自动帮你 memo 了 element**（查 `vite.config` / `package.json` 是否有 `babel-plugin-react-compiler`）。**这不矛盾——编译器做的就是"自动稳定 props 引用"这件事**。
+
+---
+
+## 实验 J1：props 引用稳定性 = 能否观察 context 精准标记的前提
 
 ---
 
@@ -41,13 +72,15 @@ export default function App() {
 }
 ```
 
-**预期（关键！）**：点 **任何一个按钮**，console 都打印 **3 行**（A/B/C 全渲染）。
+**预期（仅当 element 引用每次新建时，即纯手写 JSX 且未开 React Compiler）**：点 **任何一个按钮**，console 都打印 **3 行**（A/B/C 全渲染）。
 
 - 改 toggle：3 个都渲染，值不变（A=outer, B=inner, C=outer）
 - 改 inner：3 个都渲染（A=outer, B=inner!, C=outer）
 - 改 outer：3 个都渲染（A=outer!, B=inner, C=outer!）
 
-⭐ **结论**：DeepChild 没包 memo → App 重渲染时 props 每次新引用 → bailout 失败 → 三个全渲染。**三个按钮行为一样**。这时候根本看不出 context 的"精准标记"。
+⭐ **结论**：element props 每次新引用 → `oldProps !== newProps` → bailout 失败 → 三个全渲染。**三个按钮行为一样**。这时候看不出 context 的"精准标记"。
+
+⚠️ **重要前提**：上面"3 行"只在 **element 引用每次都新建** 时成立。如果你的项目开了 React Compiler（Vite + React 19 常见），编译器会自动缓存 element → A/C 的 `oldProps === newProps` → 它们 bailout 成功 → **改 inner 只打印 1 行 `inner!`**（等价于下面"加 memo 版"的效果）。所以你看到 1 行不是 bug，是编译器自动 memo 的结果。
 
 ---
 
