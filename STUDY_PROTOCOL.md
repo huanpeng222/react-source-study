@@ -182,6 +182,18 @@ react-source-study/
    - 判断标准：如果某个细节只在"追问"里出现、教程正文没有，就是不合格，必须补进正文。
    - 每节讲完出 1 道微检查点小问题，确认懂了再进下一节（避免学到一半才发现"乱了"）。
 
+10. **★ 实验必须本地实测，禁止凭印象写"预期" ★**（2026-06-23 学习者反馈 Day9 实验连续翻车后新增，**最高优先级**）：
+    - 写进 `demos/dayN/` 的任何"预期结果/输出/渲染次数/字段值"，**必须先在本机实际跑出来**，把真实输出当预期，**严禁凭推断/印象写**。
+    - 跑实验的标准环境（已验证可用）：
+      - 工作区 `cd /Users/guest_1/.workbuddy/binaries/node/workspace`，已装 `react react-dom jsdom`（可 `npm install react@<版本>` 切版本）。
+      - 用 `jsdom` 造 DOM + `react-dom/client` + `react` 的 `act` 包裹更新，`console.log` 收集渲染/字段，运行：`NODE_PATH=.../workspace/node_modules node xxx.mjs`。
+      - React 17 用 `react-dom/test-utils.js` 的 `act` + `ReactDOM.render`，并 polyfill `requestAnimationFrame`。
+    - **版本与编译器差异必须标注**：渲染行为受 React 版本（17/18/19）和 **React Compiler（Vite+React19 .tsx 常自动开 `babel-plugin-react-compiler`，会自动缓存 element=自动 memo）** 影响极大。预期里必须写清"此结果基于 react@X，是否开编译器"。
+    - **DOM 节点 fiber ≠ 组件 fiber**：用 ref 抓 `__reactFiber$` 抓到的是 DOM 节点(HostComponent tag=5)，它没有 Hook 链表/dependencies；要看组件状态必须 `fiber.return` 跳到组件 fiber。写涉及 fiber 字段的实验必须实测确认抓对了层级。
+    - **DevTools 控制台会折叠相邻的相同日志**（左侧显示计数徽标）。凡靠 `console.log` 数"渲染了几次"的实验，**必须给每个实例打唯一标识**（如 `console.log(label, ...)`），否则相同日志被折叠会让学习者误判次数。
+    - 行为类结论必须标源码出处（`ReactFiberBeginWork.js` bailout、`ReactFiberHooks.js`、`ReactFiberNewContext.js` 等）+ 本地实测双重佐证。
+    - 学习者实验结果和预期不符时：**先怀疑自己的预期/实验设计，本地复跑核实**，不要硬编解释。
+
 ### ❌ 禁止做
 
 1. ❌ **禁止贴完整可抄代码骨架**当作"思考提示"。
@@ -192,6 +204,8 @@ react-source-study/
 6. ❌ **禁止跳过 `dayN-summary.md`**——这是 4 件套里最重要的一份（学习者复习时只看这个）。
 7. ❌ **禁止把 summary 写成 dayN.md 的复制**——summary 是"压缩 + 个人化"，不是"删减"。
 8. ❌ **禁止"面向答案"讲解**——教程正文必须系统完整，不能只覆盖学习者追问到的点。源码细节宁可多讲，不可遗漏。
+9. ❌ **禁止写没跑过的实验"预期"**——`demos/dayN/` 里所有预期输出必须本机实测得出（见必做 #10）。凭印象推断渲染次数/fiber 字段/输出顺序属于严重违规。
+10. ❌ **禁止忽略 React 版本 / 编译器差异**——同一段代码在 react17 / react18 / react19+Compiler 下渲染行为可能完全不同，预期必须标版本前提。
 
 ---
 
