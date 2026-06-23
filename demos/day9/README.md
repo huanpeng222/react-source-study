@@ -157,6 +157,10 @@ export default function App() {
 
 ## 实验 J3：看 fiber.dependencies（DevTools / console）
 
+⚠️ **关键坑（必读）**：`dependencies` 记在 **"调用 `useContext` 的那个组件 fiber"** 上，**不在它渲染出的 DOM 节点上**。
+如果你把 ref 挂在 `<li>` 上直接读它的 fiber，抓到的是 `<li>` 这个 **HostComponent（tag=5）**——它自己没调 useContext、也没有 Hook 链表，所以 `dependencies` 和 `memoizedState` **都是 null（这是正常的，不是实验失败！）**。
+必须用 `.return` 跳一层到**组件 fiber** 才能看到。
+
 在 J2 的 `MemoChild` 里用 ref 抓 fiber：
 
 ```jsx
@@ -164,14 +168,27 @@ import { useRef, useEffect } from 'react';
 // MemoChild 内：
 const liRef = useRef(null);
 useEffect(() => {
-  const key = Object.keys(liRef.current).find(k => k.startsWith('__reactFiber$'));
-  const fiber = liRef.current[key];
-  console.log('dependencies:', fiber?.dependencies);
-  console.log('memoizedState(Hook链表头):', fiber?.memoizedState);
+  const node = liRef.current;
+  const key = Object.keys(node).find(k => k.startsWith('__reactFiber$'));
+  const liFiber = node[key];
+
+  // ❌ liFiber 是 <li>（tag=5 DOM），dependencies/memoizedState 都是 null（正常）
+  console.log('li.tag =', liFiber.tag, '→ dependencies =', liFiber.dependencies);
+
+  // ✅ 往上跳一层：li.return 才是调 useContext 的组件 fiber
+  const compFiber = liFiber.return;
+  console.log('组件 fiber.tag =', compFiber.tag, '(0=函数组件 / 15=MemoComponent)');
+  console.log('组件.dependencies =', compFiber.dependencies);
+  console.log('firstContext.context === ThemeCtx ?',
+    compFiber.dependencies?.firstContext?.context === ThemeCtx);
+  console.log('组件.memoizedState(Hook链表头) =', compFiber.memoizedState);
 });
 return <li ref={liRef}>{label}</li>;
 ```
 
-**预期**：
-- `dependencies.firstContext.context` 指向 ThemeCtx
-- `memoizedState` 链表里**没有** useContext 的节点（只有 useRef / useEffect 的）—— 证明 useContext 不占 Hook 节点
+**预期（抓对组件 fiber 后，本地实测 react@19 已验证）**：
+- `li.dependencies` = **null**（DOM 节点不消费 context，正常）
+- `compFiber.dependencies.firstContext.context` **=== ThemeCtx**（true）
+- `compFiber.memoizedState` 链表里**只有 useRef / useEffect 两个节点**，**没有** useContext 的节点 —— 证明 useContext 不占 Hook 节点
+
+⭐ **如果你看到全是 null**：99% 是 ref 挂在 DOM 元素上、没 `.return` 跳到组件 fiber。`<li>`(tag=5) 本就没有 deps/Hook。
