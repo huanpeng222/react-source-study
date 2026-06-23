@@ -214,5 +214,24 @@
 
 ---
 
+## Day 9（useContext 源码 + Context 穿透 memo）
+
+55. **我以为** useContext 跟其他 Hook 一样在 memoizedState 链表上有节点。
+    **其实** 它根本没有 mountContext 函数，不占 Hook 节点。每次直接 readContext 读 context._currentValue，依赖通过 fiber.dependencies 记录。
+
+56. **我以为** Context value 变化时，React 通过"绑定/订阅"找到消费者。
+    **其实** 是 propagateContextChanges DFS 遍历 Provider 子树，挨个检查 dependencies.firstContext 链表匹配 context 引用，匹配上就改 lanes。
+
+57. **我以为** Context 穿透 memo 是某种"特殊通道"。
+    **其实** 就是改 fiber.lanes → 破坏 bailout 条件（hasScheduledUpdateOrContext()）→ 逼 beginWork 走完整渲染路径。没有黑魔法。
+
+58. **我以为** React.memo(Consumer) 能阻止 Context 引起的重复渲染。
+    **其实** 拦不住——lanes 已被改，bailout 条件直接失效。Context 设计上就是所有消费者必须更新。
+
+59. **我以为** useMemo 包裹 value 对象能完全解决 Context 性能问题。
+    **其实** 只能解决"value 引用不稳定导致 Consumer 多渲染一次"的问题，但不能解决"所有消费了同一个 context 的组件都强制渲染"——那是 Context 机制本身的代价。真正解法是拆分 Context。
+
+---
+
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
 

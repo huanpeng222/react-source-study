@@ -16,7 +16,7 @@
 | W2 | D6 | Hooks 实现原理：useState | ✅ |
 | W2 | D7 | useEffect / useLayoutEffect + effect 链表 | ✅ |
 | W2 | D8 | useRef / useMemo / useCallback | ✅ |
-| W2 | D9 | useContext 源码 + Context 穿透 memo | ⏳ |
+| W2 | D9 | useContext 源码 + Context 穿透 memo | ✅ |
 
 完整路线见 [`meta/roadmap.md`](./meta/roadmap.md)。
 
