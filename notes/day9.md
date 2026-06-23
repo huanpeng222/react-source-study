@@ -288,6 +288,37 @@ const value = useMemo(() => ({ count }), [count]);
 
 **但注意**：这只解决了"不必要的子组件渲染"，**不能解决"所有消费者强制渲染"**——那是 Context 的设计，不是 bug。
 
+### 5.4 ⚠️ 重要前提：propagateContextChanges 的"精准"必须配合 memo 才能观察到
+
+这是一个极易踩的认知坑（本项目作者实测踩过）：
+
+> **如果消费组件没有包 `React.memo`，你根本看不出 context 的"只渲染消费者"精准性——因为"父重渲染 → 子默认全渲染"这个更粗的行为已经让所有子组件都渲染了。**
+
+```jsx
+// DeepChild 没包 memo
+function DeepChild() {
+  const val = useContext(Ctx);
+  return <li>{val}</li>;
+}
+// App 里点任何按钮（哪怕和 context 无关的 setToggle）：
+//   App 重渲染 → <DeepChild /> 每次新 props 引用 → bailout 失败 → 全部 DeepChild 渲染
+//   → context 的精准标记被"默认全渲染"完全盖住，三个按钮行为看起来一样
+```
+
+加上 memo 后才能看出三种行为的区别：
+
+| 操作 | 无 memo | 有 memo |
+|---|---|---|
+| 改无关 state（value 不变） | 全渲染 | **全不渲染**（propagateContextChanges 根本不触发）|
+| 改某层 Provider 的 value | 全渲染 | **只该 Provider 子树内的消费者渲染**（精准标记 + 穿透 memo）|
+
+⭐ **结论**：
+1. `propagateContextChanges` 的"精准只标记消费者"**确实存在**，但它的价值是"配合 memo 时能精准 bailout 掉非消费者"。
+2. 没有 memo 时，React 的默认行为是"父变子全变"，轮不到 context 机制发挥精准性。
+3. 所以"Context 性能优化"几乎总是和 `React.memo` 一起谈——单独的 Context 机制无法阻止默认的全渲染。
+
+详见 `demos/day9/README.md` 的 J1（无 memo vs 有 memo 对照实验）。
+
 > 🔍 微检查点 5：`useContext` 比 `useState` 轻在哪？比 `useEffect` 又轻在哪？（提示：没有 queue、没有 flag、不占 Hook 节点、不参与 commit）
 
 ---

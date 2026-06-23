@@ -1,21 +1,24 @@
 # Day 9 实验：useContext + Provider + dependencies
 
 > 代码贴进 Vite + React playground
-> 目标：验证 Provider 嵌套值覆盖 / Context 穿透 memo / DevTools 看 dependencies
+> ⚠️ 核心教训：Context "只渲染消费者" 的精准性，**必须配合 React.memo 才能观察到**。
+> 没有 memo 时，"父重渲染 → 子默认全渲染" 会盖住 context 机制。
 
-## 实验 J1：Provider 嵌套与值覆盖
+---
 
-### 代码
+## 实验 J1：无 memo vs 有 memo 对照（理解 context 机制的前提）
+
+### 第一步：无 memo 版（先看"默认全渲染"）
 
 ```jsx
 import { createContext, useContext, useState } from 'react';
 
 const Ctx = createContext('default');
 
-function DeepChild() {
+function DeepChild({ tag }) {
   const val = useContext(Ctx);
-  console.log('  DeepChild 读到的值:', val);
-  return <li>{val}</li>;
+  console.log(`  [无memo] DeepChild#${tag} render, 读到:`, val);
+  return <li>{tag}: {val}</li>;
 }
 
 export default function App() {
@@ -26,28 +29,61 @@ export default function App() {
   return (
     <Ctx.Provider value={outer}>
       <button onClick={() => setOuter(o => o + '!')}>改 outer</button>
-      <DeepChild />
+      <button onClick={() => setInner(i => i + '!')}>改 inner</button>
+      <button onClick={() => setToggle(t => !t)}>toggle（value 不变）</button>
+      <DeepChild tag="A(外层)" />
       <Ctx.Provider value={inner}>
-        <button onClick={() => setInner(i => i + '!')}>改 inner</button>
-        <DeepChild />
+        <DeepChild tag="B(内层)" />
       </Ctx.Provider>
-      <button onClick={() => setToggle(t => !t)}>toggle（无关更新）</button>
-      <DeepChild />
+      <DeepChild tag="C(外层)" />
     </Ctx.Provider>
   );
 }
 ```
 
-### 预期
+**预期（关键！）**：点 **任何一个按钮**，console 都打印 **3 行**（A/B/C 全渲染）。
 
-1. 初始：`outer / inner / outer`（Provider 嵌套生效）
-2. 点"改 inner"：只有内层 DeepChild 重新渲染，读到新 inner
-3. 点"改 outer"：内层、外层两个 DeepChild 都重新渲染（外层读 outer，内层的 dependencies 也匹配了 Ctx）
-4. 点"toggle"：所有 DeepChild 都重新渲染（因为 App 重新渲染，Provider value={`outer`/`inner`} 引用没变？注意字符串字面量 === 是稳定的，所以不会触发 propagateContextChanges——但组件函数本身会重跑）
+- 改 toggle：3 个都渲染，值不变（A=outer, B=inner, C=outer）
+- 改 inner：3 个都渲染（A=outer, B=inner!, C=outer）
+- 改 outer：3 个都渲染（A=outer!, B=inner, C=outer!）
 
-## 实验 J2：Context 穿透 React.memo
+⭐ **结论**：DeepChild 没包 memo → App 重渲染时 props 每次新引用 → bailout 失败 → 三个全渲染。**三个按钮行为一样**。这时候根本看不出 context 的"精准标记"。
 
-### 代码
+---
+
+### 第二步：加 memo 版（这才能看出 context 机制）
+
+把 `DeepChild` 改成：
+
+```jsx
+import { memo } from 'react';
+
+const DeepChild = memo(function DeepChild({ tag }) {
+  const val = useContext(Ctx);
+  console.log(`  [有memo] DeepChild#${tag} render, 读到:`, val);
+  return <li>{tag}: {val}</li>;
+});
+```
+
+（`tag` 是字符串字面量，props 稳定，memo 浅比较通过）
+
+**预期（差异终于出现）**：
+
+| 操作 | console 打印 | 原因 |
+|---|---|---|
+| 改 toggle（value 不变） | **0 行**（都不渲染）| props 没变 + value 没变 → bailout 成功 |
+| 改 inner（内层 value 变） | **只 B(内层) 1 行** | propagateContextChanges 只标记内层 B 的 lanes，穿透其 memo；A/C 不在内层 Provider 子树，bailout 成功 |
+| 改 outer（外层 value 变） | **A/B/C 3 行** | 三个都在外层 Provider 子树且都消费 Ctx → 都被标记 lanes → 都穿透 memo |
+
+⭐ **核心结论**：
+- **propagateContextChanges 精准标记消费者**的价值，只有在 memo 挡住"默认全渲染"后才显现
+- **改 toggle 0 行**证明：context value 不变时，propagateContextChanges 根本不触发
+- **改 inner 只 1 行**证明：只有"该 Provider 子树内 + 消费了该 context"的 fiber 被标记
+- **改 outer 3 行**证明：外层 Provider 子树覆盖全部三个，DFS 穿透嵌套 Provider 也能标记到内层 B
+
+---
+
+## 实验 J2：Context 穿透 React.memo（单独聚焦穿透）
 
 ```jsx
 import { createContext, useContext, useState, memo } from 'react';
@@ -77,19 +113,32 @@ export default function App() {
 }
 ```
 
-### 预期
+**预期**：
 
-1. 点"改 count"：App 重新渲染 → Provider 重新渲染。但因为 `value={theme}` 是字符串，`theme` 没变时引用相等 → value 没变 → `propagateContextChanges` 不触发。但注意 `MemoChild` 的 `label` prop 也是稳定的（字符串字面量），所以 memo 浅比较通过，**Child 不重渲染** ✅
-2. 点"改 theme"：theme 值变了 → `pushProvider` 更新 `_currentValue` → `propagateContextChanges` 标记 lane → `MemoChild` 即使 props 没变也被强制渲染 ✅（穿透验证）
+| 操作 | MemoChild 是否渲染 | 原因 |
+|---|---|---|
+| 改 count | ❌ 不渲染 | theme 没变 → value 引用不变 → 不触发 propagateContextChanges；label 稳定 → memo bailout |
+| 改 theme | ✅ 渲染 | value 变 → propagateContextChanges 标记 lanes → 穿透 memo |
 
-## 实验 J3：看 fiber.dependencies（DevTools）
+---
 
-在 J2 的 `MemoChild` 里加：
+## 实验 J3：看 fiber.dependencies（DevTools / console）
+
+在 J2 的 `MemoChild` 里用 ref 抓 fiber：
 
 ```jsx
-const fiberKey = Object.keys(memoChildRef.current).find(k => k.startsWith('__reactFiber$'));
-const fiber = memoChildRef.current[fiberKey];
-console.log('fiber.dependencies:', fiber?.dependencies);
+import { useRef, useEffect } from 'react';
+// MemoChild 内：
+const liRef = useRef(null);
+useEffect(() => {
+  const key = Object.keys(liRef.current).find(k => k.startsWith('__reactFiber$'));
+  const fiber = liRef.current[key];
+  console.log('dependencies:', fiber?.dependencies);
+  console.log('memoizedState(Hook链表头):', fiber?.memoizedState);
+});
+return <li ref={liRef}>{label}</li>;
 ```
 
-确认 `dependencies.firstContext.context` 指向 ThemeCtx。
+**预期**：
+- `dependencies.firstContext.context` 指向 ThemeCtx
+- `memoizedState` 链表里**没有** useContext 的节点（只有 useRef / useEffect 的）—— 证明 useContext 不占 Hook 节点

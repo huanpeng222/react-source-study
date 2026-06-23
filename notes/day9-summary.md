@@ -78,6 +78,16 @@ if (oldProps === newProps && !hasScheduledUpdate() && !hasScheduledContext())
 
 位掩码优先级模型。`propagateContextChanges` 改消费者 `lanes` → 破坏 bailout 条件 → 穿透 memo。
 
+### 追问 3：实验里点 toggle/inner/outer 三个 DeepChild 都渲染？（重要纠错）
+
+原 demo 的 DeepChild **没包 memo**。没 memo 时："父重渲染 → 子每次新 props 引用 → bailout 失败 → 全部子组件渲染"。这个粗行为盖住了 context 精准标记，三个按钮行为完全一样（全渲染）。
+
+⭐ **关键认知**：`propagateContextChanges`"只标记消费者"的精准性，**必须配合 React.memo 才观察得到**：
+- 无 memo：点任何按钮三个都渲染（看不出 context 机制）
+- 有 memo：改无关 state → 0 渲染；改某层 value → 只该 Provider 子树内消费者渲染
+
+"Context 性能优化"几乎总和 memo 一起谈——单独 context 机制阻止不了默认全渲染。
+
 ## 5 句口诀
 
 1. useContext 不建节点、不存数据、每次 render 直接读

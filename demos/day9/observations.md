@@ -1,26 +1,29 @@
 # Day 9 实验观察记录（待回填）
 
-## J1：Provider 嵌套与值覆盖
+## J1：无 memo vs 有 memo 对照
 
-- 初始三个 `DeepChild` 打印的值：
-  - 外层：____（预期：outer）
-  - 内层：____（预期：inner）
-  - 外层后：____（预期：outer）
+### 无 memo 版
+- 点 toggle / inner / outer，各打印几行？____（预期：每个都 3 行，A/B/C 全渲染）
+- 三个按钮行为一样吗？____（预期：一样，都全渲染 —— context 机制被"默认全渲染"盖住）
 
-- 点"改 inner"后：____（预期：只有内层 DeepChild 重渲染）
+### 有 memo 版
+- 改 toggle（value 不变）：____（预期：0 行）
+- 改 inner（内层 value 变）：____（预期：只 B 内层 1 行）
+- 改 outer（外层 value 变）：____（预期：A/B/C 3 行）
 
-- 点"改 outer"后：____（预期：外层 + 内层 DeepChild 都重渲染）
+⭐ 关键体会：context "只渲染消费者" 的精准性，必须配合 memo 才能看出来。
 
 ## J2：Context 穿透 React.memo
 
-- 点"改 count"：MemoChild 是否重渲染？____（预期：不重渲染，字符串字面量稳定）
+- 改 count（无关）：MemoChild 渲染吗？____（预期：不渲染）
+- 改 theme：MemoChild 渲染吗？____（预期：渲染，穿透 memo）
 
-- 点"改 theme"：MemoChild 是否重渲染？____（预期：重渲染，穿透 memo）
+## J3：fiber.dependencies
 
-## J3：看 fiber.dependencies
+- `dependencies.firstContext.context` 指向：____（预期：ThemeCtx）
+- `memoizedState` 链表里有 useContext 节点吗？____（预期：没有，只有 useRef/useEffect）
 
-- DevTools 中 `fiber.dependencies.firstContext.context` 指向：
-  ____（预期：指向 ThemeCtx 这个 context 对象）
+## 我的最大收获
 
-- `fiber.memoizedState` 上有没有 useContext 对应的 Hook 节点？
-  ____（预期：没有。memoizedState 链表里是 useState 的节点，没有 useEffect 的）
+（回填：原以为"改 inner 只有内层渲染"——其实没 memo 时三个都渲染；
+context 的精准标记必须配合 memo 才显现。）

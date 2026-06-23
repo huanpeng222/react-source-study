@@ -231,6 +231,9 @@
 59. **我以为** useMemo 包裹 value 对象能完全解决 Context 性能问题。
     **其实** 只能解决"value 引用不稳定导致 Consumer 多渲染一次"的问题，但不能解决"所有消费了同一个 context 的组件都强制渲染"——那是 Context 机制本身的代价。真正解法是拆分 Context。
 
+60. **我以为** Context 的"只渲染消费者"精准性，在普通组件里就能观察到。
+    **其实** 必须配合 React.memo 才看得到。没 memo 时"父重渲染→子每次新 props 引用→bailout 失败→全部子组件渲染"这个粗行为会盖住 context 的精准标记，点任何按钮（哪怕和 context 无关的 setState）三个消费者都渲染，行为看起来一样。只有给消费者包 memo，propagateContextChanges 的"只标记该 Provider 子树内消费者"才显现。所以"Context 性能"几乎总和 memo 一起谈。（本认知由 Day9 J1 实验实测纠错得出）
+
 ---
 
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
