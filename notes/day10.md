@@ -118,6 +118,47 @@ lanes  = 0b0010100   (20)
 
 ---
 
+### 2.3 五个工具函数各自"什么时候被调用"（源码逐行核对）
+
+> 这五个函数定义在 `packages/react-reconciler/src/ReactFiberLane.js`
+> （`includesSomeLane` L784 / `isSubsetOfLanes` L788 / `mergeLanes` L792 / `removeLanes` L796 / `getHighestPriorityLane` 在 `getHighestPriorityLanes` L180 内被调用）。
+> 它们本身只是裸位运算，**真正的调用方散在 reconciler 各文件**。下面行号对照 facebook/react `main` 分支（2026-06 抓取核对）。
+
+| 函数 | 位运算 | 干什么 | 主要调用阶段 |
+|---|---|---|---|
+| `mergeLanes` | `a \| b` | 把 lane 并进集合 | 更新冒泡 / completeWork 汇总 childLanes |
+| `getHighestPriorityLane` | `l & -l` | 取最低位=最高优先级 | 选批次 getNextLanes |
+| `includesSomeLane` | `(a&b)!==0` | 有没有交集（OR 关系） | beginWork 判断要不要重渲 |
+| `isSubsetOfLanes` | `(s&b)===b` | 是不是子集（AND 关系） | hook update 队列取舍 |
+| `removeLanes` | `s & ~b` | 从集合里抹掉 | 重置 baseLanes / suspended 清账 |
+
+**① `mergeLanes`（最高频，全程都在用）**
+- `ReactFiberConcurrentUpdates.js` `markUpdateLaneFromFiberToRoot`（L195-208）：把这条 lane 累加到 sourceFiber.lanes 及沿 `return` 链每个 `parent.childLanes`（含 alternate）。这是更新冒泡的核心。
+- `ReactFiberCompleteWork.js` `bubbleProperties`（L809-887）：completeWork 回溯时把子节点 `lanes|childLanes` 往上汇总成父 `newChildLanes`。
+- `ReactFiberHooks.js` L3859 `updateReducer` 入队：`newQueueLanes = mergeLanes(queueLanes, lane)`，记录队列里还欠哪些 lane。
+
+**② `getHighestPriorityLane`**
+- `ReactFiberLane.js` `getHighestPriorityLanes`（L185、L213）内部：选批次时先取最急的一条来归类。`getNextLanes`（L286+）层层调用它决定本趟 renderLanes。**唯一在 Lane 文件里就被反复调用的函数。**
+
+**③ `includesSomeLane`（"沾边就算"）**
+- `ReactFiberBeginWork.js`（17 处）：核心在 `bailoutOnAlreadyFinishedWork`（L3807、L3816）——`if (!includesSomeLane(renderLanes, workInProgress.childLanes))` 子树没活就整棵跳过；Context 消费判断 L1013、L3029 `includesSomeLane(renderLanes, current.childLanes)`。
+- `ReactFiberWorkLoop.js` L4325-4327：判断本趟是否含 `UpdateLanes`/`SyncUpdateLanes`。
+
+**④ `isSubsetOfLanes`（"必须完全包含"）**
+- `ReactFiberHooks.js` `updateReducer`（L1378-1379）：`shouldSkipUpdate = !isSubsetOfLanes(renderLanes, updateLane)`——update 的 lane 没被本趟 renderLanes 完全覆盖就**跳过、攒到下趟**。这是低优先级 update 被保留的核心机制。
+- `ReactFiberWorkLoop.js` L5019：ping 回来的 lane 是否仍是当前 render 的子集，决定能否复用。
+
+**⑤ `removeLanes`（从集合抹掉）**
+- `ReactFiberWorkLoop.js` L1796-1797：`suspendedLanes = removeLanes(suspendedLanes, pingedLanes)`——被 ping 唤醒的 lane 从挂起集合移除。
+- `ReactFiberBeginWork.js` L2351 / L670：离开 Offscreen 边界时 `removeLanes(current.childLanes, renderLanes)`，把已渲染的从剩余里减掉。
+- `ReactFiberHooks.js` L922：`current.lanes = removeLanes(current.lanes, lanes)` 清掉已处理的 hook lane。
+
+> ⚠️ 诚实标注：本地 `react@19.2.7` 的 `react-dom` 打包构建里，这四个函数（除 `getHighestPriorityLanes`）已被**内联成裸位运算、函数名消失**，无法本地 grep 行号。以上行号全部来自官方源码仓库 facebook/react `main` 分支核对；不同版本/tag 行号会漂移，函数名级别的调用关系稳定。
+
+> 🔑 区分易混点：`includesSomeLane` 是"两批有交集就成立"（"要不要碰这棵子树"）；`isSubsetOfLanes` 是"subset 每一位都在 set 里才成立"（"这条 update 够不够格本趟生效"）。
+
+---
+
 ## 三、一次更新如何被分配 Lane
 
 ### 3.1 入口：requestUpdateLane
