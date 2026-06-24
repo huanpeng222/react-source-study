@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>React 源码前 10 天 · 深度面试题</title>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+<style>
+:root {
+  --bg: #f8f9fb;
+  --surface: #ffffff;
+  --border: #e2e4e8;
+  --text: #1a1d23;
+  --text2: #5e6570;
+  --text3: #9198a3;
+  --tag1: #3a6ea5;
+  --tag2: #8b5cf6;
+  --tag3: #0891b2;
+  --accent: #2563eb;
+  --accent2: #dc2626;
+  --hover: #f0f2f5;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+.container { max-width: 800px; margin: 0 auto; padding: 0 20px 60px; }
+.header { padding: 40px 0 28px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
+.header h1 { font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
+.header .sub { font-size: 14px; color: var(--text2); margin-top: 6px; }
+.header .meta { font-size: 12px; color: var(--text3); margin-top: 4px; display: flex; gap: 16px; flex-wrap: wrap; }
+.header .meta span { background: var(--bg); padding: 2px 10px; border-radius: 10px; border: 1px solid var(--border); }
+.controls { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
+.controls button { font-size: 13px; padding: 6px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); cursor: pointer; color: var(--text2); transition: all .15s; }
+.controls button:hover { background: var(--hover); color: var(--text); border-color: var(--tag1); }
+.qcard { background: var(--surface); border-radius: 12px; border: 1px solid var(--border); margin-bottom: 20px; overflow: hidden; }
+.qheader { padding: 16px 20px 12px; cursor: pointer; transition: background .15s; display: flex; align-items: flex-start; gap: 12px; }
+.qheader:hover { background: var(--hover); }
+.qnum { font-size: 12px; font-weight: 600; color: var(--surface); background: var(--accent); border-radius: 8px; padding: 2px 10px; white-space: nowrap; margin-top: 2px; flex-shrink: 0; }
+.qnum.t2 { background: var(--tag2); }
+.qnum.t3 { background: var(--tag3); }
+.qnum.t1 { background: var(--tag1); }
+.qbody { flex: 1; }
+.qtitle { font-size: 14px; font-weight: 600; line-height: 1.5; }
+.qtags { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.qt { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: #eef1f6; color: var(--text2); border: 1px solid var(--border); }
+.qdesc { font-size: 13px; color: var(--text2); margin-top: 8px; padding: 8px 12px; background: var(--bg); border-radius: 8px; line-height: 1.7; }
+.qdesc code { font-size: 12px; background: #e8ecf3; padding: 1px 5px; border-radius: 4px; }
+details { border-top: 1px solid var(--border); }
+details summary { font-size: 13px; font-weight: 500; color: var(--accent); padding: 12px 20px; cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; transition: background .15s; }
+details summary:hover { background: var(--hover); }
+details summary::before { content: "+"; font-size: 14px; font-weight: 700; color: var(--accent); }
+details[open] summary::before { content: "-"; }
+.answer { padding: 0 20px 20px; font-size: 13px; color: var(--text); }
+.answer p { margin: 8px 0; }
+.answer code { font-size: 12px; background: #eef1f6; padding: 1px 5px; border-radius: 4px; }
+.answer .key { background: #fef3c7; border: 1px solid #fcd34d; border-radius: 6px; padding: 8px 12px; margin: 10px 0; font-size: 12px; }
+.answer .key b { color: #92400e; }
+.answer .hl { background: #dbeafe; border: 1px solid #93c5fd; border-radius: 6px; padding: 8px 12px; margin: 10px 0; font-size: 12px; }
+.answer .hl b { color: #1e40af; }
+.answer ul, .answer ol { margin: 6px 0; padding-left: 20px; }
+.answer li { margin: 3px 0; }
+pre[class*="language-"] { margin: 10px 0 !important; border-radius: 8px !important; font-size: 12.5px !important; }
+code[class*="language-"] { font-size: 12.5px !important; }
+.followup { margin-top: 12px; padding: 10px 12px; background: #f0f9ff; border: 1px solid #b8d8f0; border-radius: 8px; font-size: 12px; }
+.followup .label { font-weight: 600; color: var(--tag1); }
+.footer { text-align: center; font-size: 12px; color: var(--text3); padding: 20px 0 40px; border-top: 1px solid var(--border); margin-top: 32px; }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+<div class="header">
+  <h1>react 源码前 10 天 · 深度面试题</h1>
+  <div class="sub">每题串联 2-4 天的知识点。先全部想一遍，再点开答案对照。</div>
+  <div class="meta">
+    <span>8 题</span>
+    <span>覆盖 D1-D10</span>
+    <span>含源码级问题</span>
+    <span>来自实际踩坑</span>
+  </div>
+</div>
+
+<div class="controls">
+  <button onclick="document.querySelectorAll('details').forEach(d=>d.open=true)">展开全部答案</button>
+  <button onclick="document.querySelectorAll('details').forEach(d=>d.open=false)">收起全部</button>
+  <button onclick="window.scrollTo({top:0,behavior:'smooth'})">回到顶部</button>
+</div>
+
+<!-- Q1 -->
+<div class="qcard">
+<div class="qheader">
+  <span class="qnum">Q1</span>
+  <div class="qbody">
+    <div class="qtitle">fiber 节点上的 <code>alternate</code> 是什么时候创建的？双缓存的两棵树是怎么关联起来的？</div>
+    <div class="qtags"><span class="qt">D2</span><span class="qt">D4</span><span class="qt">D5</span></div>
+    <div class="qdesc">
+      <p>一段伪代码：</p>
+<pre class="language-javascript"><code>function beginWork(current, workInProgress) {
+  if (current !== null) {
+    // 更新阶段：走 reconcile，复用 alternate
+  } else {
+    // 首次挂载
+  }
+}</code></pre>
+      <p><code>current</code> 和 <code>workInProgress</code> 的 <code>alternate</code> 分别指向谁？第一次 mount 时 <code>current</code> 是什么？</p>
+    </div>
+  </div>
+</div>
+<details><summary>查看答案</summary>
+<div class="answer">
+  <div class="key"><b>关键源码</b>：<code>createWorkInProgress(current, pendingProps)</code>（<code>ReactFiber.js</code>）</div>
+  <p><b>1. alternate 的创建时机：</b><p>
+  <ul>
+    <li>第一次 mount：<code>createFiberRoot</code> 创建 <code>root.current</code>（一个 <code>HostRoot</code> fiber，<code>alternate=null</code>）。<code>root.render(&lt;App/&gt;)</code> → <code>createWorkInProgress(root.current, ...)</code> 在 <code>workInProgress = createFiber(current.tag, ...)</code> 之后设置 <code>wip.alternate = current; current.alternate = wip</code>。此时 <b>current ←→ wip 双向互指建立</b>。</li>
+    <li>子 fiber：<code>useFiber(current.child, ...)</code> 内部同样调用 <code>createWorkInProgress</code>，也是双向互指。两棵树所有节点一一配对。</li>
+  </ul>
+  <p><b>2. 首次 mount 时 <code>current === null</code>：</b></p>
+  <ul>
+    <li>第 1 次 beginWork 进入时，子 fiber 的 <code>current</code> 为 null（旧树上没有对应节点）。<code>mountIndeterminateComponent</code> 接手，不走 reconcile，直接执行函数后创建 wip 子节点。</li>
+    <li>这些 wip 子节点没有 <code>alternate</code>——因为旧树根本不存在对应 fiber。</li>
+    <li><b>commit 后</b> <code>root.current = finishedWork</code>，但到下一次更新时，旧 fiber 才有 <code>alternate</code> 指向新树。</li>
+  </ul>
+  <p><b>3. alternate 的更新同步</b>：<code>markUpdateLaneFromFiberToRoot</code> 里每次标 <code>fiber.lanes</code> 都要同时标 <code>if (alternate !== null) alternate.lanes = mergeLanes(...)</code>。双缓存必须保持一致，否则 beginWork 的 <code>oldProps !== newProps</code> 判断会出错（wip 从 current 复制 props）。</p>
+  <div class="followup"><span class="label">追问：</span>为什么不直接让 wip 用 current 的内存，非要复制一份？</div>
+</div>
+</details>
+<details><summary>追问答案</summary>
+<div class="answer">
+  <p>因为 reconcile 是<b>不可逆的原地修改</b>——diff 中 <code>wip.child = reconcile(...)</code> 会替换引用、改变 <code>flag</code>。如果 wip 和 current 共享同一对象，commit 前 current 已经被污染了。双缓存本质就是<b>"内存中两棵树，一个完整旧版，一个构建新版"</b>，commit 时原子切换。这正是"可丢弃 wip"的底气。</p>
+</div>
+</details>
+</div>
+
+<!-- Q2 -->
+<div class="qcard">
+<div class="qheader">
+  <span class="qnum t2">Q2</span>
+  <div class="qbody">
+    <div class="qtitle"><code>bailout</code> 条件是什么？为什么 <code>React.memo</code> 包了的组件会被 <code>useContext</code> 穿透？</div>
+    <div class="qtags"><span class="qt">D4</span><span class="qt">D9</span><span class="qt">D10</span></div>
+    <div class="qdesc">
+      <p>bailout 的判断在 beginWork 开头。请回答：</p>
+      <ol>
+        <li>bailout 成立的<b>几条路径</b>是什么？</li>
+        <li>其中跟 lane 有关的条件是什么？</li>
+        <li>为什么即使包了 <code>React.memo</code>，context 变化时消费者仍然 bailout 失败？源码发生了什么？</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<details><summary>查看答案</summary>
+<div class="answer">
+  <div class="key"><b>源码</b>：<code>ReactFiberBeginWork.js</code> 的 <code>beginWork</code> 开头 + <code>bailoutOnAlreadyFinishedWork</code></div>
+  <p><b>1. bailout 全路径：</b></p>
+  <ul>
+    <li>Path A：props 无变化（<code>oldProps === newProps</code> 或 <code>shallowEqual</code> 通过）+ <code>!includesSomeLane(renderLanes, fiber.lanes)</code>（自己没欠活）+ <code>!includesSomeLane(renderLanes, fiber.childLanes)</code>（子树也没活）→ <b>整棵直接跳过</b></li>
+    <li>Path B：props 无变化但自己欠活（<code>includesSomeLane</code> true）→ 自己重跑，但子树仍可 bailout</li>
+    <li>Path C：Context 变化时 <code>dependencies</code> 被 <code>propagateContextChanges</code> 改了 lane → bailout 在 props 关就挡不住了</li>
+  </ul>
+  <p><b>2. lane 相关条件</b>：<code>includesSomeLane(renderLanes, fiber.lanes)</code> 和 <code>includesSomeLane(renderLanes, fiber.childLanes)</code>。两者都是 0（<=> NoLanes）才能整棵跳过。</p>
+  <p><b>3. 为什么 memo 拦不住 context 穿透：</b></p>
+  <ul>
+    <li>第一步：Provider 更新时 <code>pushProvider</code> 在 beginWork 里改了 <code>context._currentValue</code></li>
+    <li>第二步：beginWork 遍历子树时，<code>updateContextConsumer</code> 中<b>先于 bailout 判断</b>调 <code>prepareToReadContext</code> → <code>readContext</code></li>
+    <li>第三步：<code>readContext</code> 把 <code>fiber.dependencies</code>（含 context 信息）注册到当前 <code>lastContextDependency</code></li>
+    <li>第四步：<code>propagateContextChanges</code>（在 Provider 的 completeWork 里或 <code>scheduleContextWork</code> 里）遍历所有依赖了这个 context 的 fiber，<b>直接改 fiber.lanes</b></li>
+  </ul>
+  <p><code>fiber.lanes</code> 被改了 → 上面 Path A 的 <code>!includesSomeLane(renderLanes, fiber.lanes)</code> 检查失败（不再为 true）→ bailout 条件不满足。</p>
+  <p><b>React.memo 只能保证 props 引用稳定，拦不住 fiber.lanes 被直接写</b>。</p>
+  <div class="followup"><span class="label">追问：</span>stopPropagation 阻止了事件传播，能阻止 context 穿透吗？</div>
+</div>
+</details>
+<details><summary>追问答案</summary>
+<div class="answer">
+  <p><b>不能。</b>事件传播是 DOM 层面的冒泡，context 的 propagateContextChanges 是在 fiber 树 reconcile 过程中直接改 <code>fiber.lanes</code>，跟 DOM 事件系统完全独立。stopPropagation 根本触及不到 fiber 层面的 lane 操作。这是两个平行世界。</p>
+</div>
+</details>
+</div>
+
+<!-- Q3 -->
+<div class="qcard">
+<div class="qheader">
+  <span class="qnum t3">Q3</span>
+  <div class="qbody">
+    <div class="qtitle">同一次 <code>act()</code>（或事件回调）里连续 <code>setN(1)</code>、<code>setN(2)</code>、<code>setM(3)</code>，几次渲染？</div>
+    <div class="qtags"><span class="qt">D6</span><span class="qt">D10</span></div>
+    <div class="qdesc">
+      <p>有下面这段代码：</p>
+<pre class="language-javascript"><code>let setN, setM;
+function App() {
+  const [n, _setN] = useState(0);
+  const [m, _setM] = useState(0);
+  setN = _setN; setM = _setM;
+  return &lt;div&gt;{n} {m}&lt;/div&gt;
+}
+
+// 同一事件处理函数里：
+handleClick = () => {
+  setN(1);
+  setM(1);
+  setN(2);
+};</code></pre>
+      <p>问题：</p>
+      <ol>
+        <li>最终 n 和 m 的值是多少？</li>
+        <li>总共触发几次 render？</li>
+        <li>如果中间包了 <code>flushSync</code> 会怎样？</li>
+        <li>如果 <code>setN(1)</code> 在 startTransition 里，<code>setM(1)</code> 直接在外面，几次 render？</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<details><summary>查看答案</summary>
+<div class="answer">
+  <div class="key"><b>实测算出</b>（K1 实验）：react@19.2.7 同一 act 内两次 set→渲 1 次</div>
+  <p><b>1. 最终值：</b>n=2，m=1。</p>
+  <ul>
+    <li>setN(1) → 入队：<code>update0 = {lane: SyncLane, payload: 1}</code></li>
+    <li>setM(1) → 入队：<code>update1</code></li>
+    <li>setN(2) → 入队：<code>update2</code></li>
+    <li>render 时 updateReducer 遍历 hook.queue→apply <code>(prev) => n</code> formula→先把 update0 的 1 传给 update2 的 payload <code>(prev) => 2</code> → 最终 n=2。这是 Day 6 的"update 链按序应用"。</li>
+  </ul>
+  <p><b>2. 渲染次数：1 次 render</b>。同一个 macro/micro task 里多次 setState，scheduleUpdateOnFiber 在内部用 isBatchingUpdates/executionContext 标记去重合并为一次。</p>
+  <p><b>3. flushSync 会跳出合并：</b><code>flushSync(() => setN(1))</code> 强制立即同步渲染一次（不可中断），然后再继续累积后面的 setM(1)+setN(2) 合并做第二次渲染。总共 2 次 render。</p>
+  <p><b>4. 跨 transition 边界：</b></p>
+  <ul>
+    <li><code>startTransition(() => setN(1))</code> → n 更新被分配 TransitionLane（低优先级），不跟外面的 SyncLane 合并，独立调度</li>
+    <li><code>setM(1)</code> 直接在外面 → SyncLane（高优先级），立即调度</li>
+    <li>结果：<b>2 次 render</b>。第一次 SyncLane 渲染 m=1（n 还是旧值 0）；第二次 TransitionLane 把 n=1（m 保留 1）。</li>
+  </ul>
+  <p>注意：在 jsdom 实测中两次 render 会被 <code>act</code> 刷到最终一致状态，但在真实浏览器里，两次 render 之间有明确的调度间隙。</p>
+  <div class="followup"><span class="label">追问：</span>如果 setM(1) 也在同一个 startTransition 里呢？</div>
+</div>
+</details>
+<details><summary>追问答案</summary>
+<div class="answer">
+  <p>两个 set 拿到同一条 TransitionLane（或者相邻的 TransitionLane），在同一批次内合并 → <b>1 次 render</b>。Day 10 讲到的 <code>claimNextTransitionUpdateLane</code> 轮转分配可能会错开车道，但它们都属于 <code>TransitionLanes</code>（同一车道集），<code>getNextLanes</code> 会一并选中作为 renderLanes，最终合并为一次渲染。</p>
+</div>
+</details>
+</div>
+
+<!-- Q4 -->
+<div class="qcard">
+<div class="qheader">
+  <span class="qnum t1">Q4</span>
+  <div class="qbody">
+    <div class="qtitle">concurrent 模式下，低优先级 update 在什么时候才真正"交出控制权"给高优先级？交出后低优先级 update 会怎样？</div>
+    <div class="qtags"><span class="qt">D10</span><span class="qt">D4</span><span class="qt">D5</span></div>
+    <div class="qdesc">
+      <p>假设正在用 <code>workLoopConcurrent</code> 渲染一个 DefaultLane 的更新。此时一个用户点击进来产生 SyncLane，回答：</p>
+      <ol>
+        <li>具体哪句源码导致了当前 render 中断？</li>
+        <li><code>workInProgress</code> 指针保留了吗？保留的话下次从哪里继续？</li>
+        <li>高优先级更新中又 setState 产生了新的低优先级 update，怎么处理？</li>
+        <li>commit 完成后低优先级 update 怎么捡回来？</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<details><summary>查看答案</summary>
+<div class="answer">
+  <div class="key"><b>源码</b>：<code>ReactFiberWorkLoop.js</code> <code>workLoopConcurrent</code> L1865 / <code>getNextLanes</code> L725+ / <code>markRootFinished</code></div>
+  <p><b>1. 中断的具体源码：</b></p>
+<pre class="language-javascript"><code>function workLoopConcurrent() {
+  while (workInProgress !== null && !shouldYield()) {
+    performUnitOfWork(workInProgress);
+  }
+}</code></pre>
+  <p>点击事件派发时产生 SyncLane → <code>ensureRootIsScheduled</code> 调度高优先级 → <code>shouldYield()</code> 返回 true（<code>hasPendingWork()</code> 检测到更高优先级 pending）→ <code>workLoopConcurrent</code> 循环退出 → 函数返回 → 控制权回到调度器。</p>
+  <p><b>2. workInProgress 指针：</b>保留在全局变量 <code>workInProgressRoot</code> 和 <code>workInProgress</code> 上，但<b>这棵树会被丢弃</b>。下一次 render 从 root 重新开始走 <code>performSyncWorkOnRoot</code> 或 <code>performConcurrentWorkOnRoot</code>，重新 createWorkInProgress 建新 wip 树。保留的只是 <code>workInProgressRootRenderLanes</code>（旧的 renderLanes 记录）用于后续判定。</p>
+  <p><b>3. 高优先级更新中产生的低优先级 update：</b></p>
+  <ul>
+    <li>高优先级 commit 完成后，<code>markRootFinished</code> 会清除已经完成的 lane（removeLanes）。</li>
+    <li>剩余的 pendingLanes 中包括之前低优先级的 update + 新产生的低优先级 update。</li>
+    <li><code>getNextLanes</code> 会重新选择下一个 renderLanes。如果还有 SyncLanes 就继续同步；没有就切回 concurrent。</li>
+  </ul>
+  <p><b>4. 低优先级 update 怎么捡回来：</b>update 从未丢失。<code>scheduleUpdateOnFiber</code> 在 fiber 入队时已经标好了 <code>fiber.lanes</code> / <code>fiber.childLanes</code> / <code>root.pendingLanes</code>。高优先级 commit 后 <code>root.pendingLanes</code> 中还留着低优先级的位（removeLanes 只抹去已完成的 lane）。下一轮调度 <code>getNextLanes</code> 发现还有 pending → 选出来重新渲染。不过这次是<b>从头</b>渲染——之前已跑完的部分不保留（wip 已丢弃）。</p>
+  <div class="followup"><span class="label">追问：</span>如果低优先级的 wip 已经跑完 beginWork+completeWork 但还没 commit，高优先级来了会怎么样？</div>
+</div>
+</details>
+<details><summary>追问答案</summary>
+<div class="answer">
+  <p>同样丢弃。即使 wip 树已经完整了（<code>workInProgressRoot === finishedWork</code>），只要还没进入 commit 阶段，高优先级一来就丢弃。只有 <code>commitRoot(root)</code> 开始执行后才能确保不被打断。这个"只能 commit 前丢、commit 后不丢"的设计保证了 React 渲染的<b>原子语义</b>——用户看到的结果要么是全更新，要么是原样。</p>
+</div>
+</details>
+</div>
+
+<!-- Q5 -->
+<div class="qcard">
+<div class="qheader">
+  <span class="qnum t2">Q5</span>
+  <div class="qbody">
+    <div class="qtitle">effect 链表中的 <code>tag</code> 和 fiber 上的 <code>flag</code> 有什么关联？<code>useEffect</code> 的 cleanup 和 setup 在什么时机执行？</div>
+    <div class="qtags"><span class="qt">D5</span><span class="qt">D7</span></div>
+    <div class="qdesc">
+      <p>你知道 effect 对象上有 <code>tag</code> 字段（<code>HookFlags</code>），fiber 上也有 <code>flags</code> 字段（<code>FiberFlags</code>）。</p>
+      <ul>
+        <li>commit 阶段怎么找到哪些 fiber 有 effect 需要处理？</li>
+        <li><code>useEffect</code> 的 cleanup 和 setup 分别在哪个子阶段执行？</li>
+        <li>如果 <code>deps</code> 没变，cleanup 会执行吗？</li>
+      </ul>
+    </div>
+  </div>
+</div>
+<details><summary>查看答案</summary>
+<div class="answer">
+  <div class="key"><b>源码</b>：<code>ReactFiberCommitWork.js</code> <code>commitBeforeMutationEffects</code> / <code>commitMutationEffects</code> / <code>commitLayoutEffects</code> / <code>flushPassiveEffects</code></div>
+  <p><b>1. fiber 的 flag 机制：</b></p>
+  <ul>
+    <li>completeWork 中 <code>bubbleProperties</code> 把子 fiber 的 flags 一路向上冒泡：<code>parent.subtreeFlags |= child.flags | child.subtreeFlags</code></li>
+    <li>commit 阶段从 root 开始，只走 <code>subtreeFlags &amp; [对应子阶段Flag] !== NoFlags</code> 的路径——相当于 flags 剪枝，只碰有活的子树</li>
+  </ul>
+  <p><b>2. useEffect 的时机：</b></p>
+  <ul>
+    <li>cleanup：<b>在 Mutation 阶段结束时</b>被 <code>scheduleCallback(NormalPriority, flushPassiveEffects)</code> 异步调度。但不是立即执行——会在 <b>下一次 commit 前</b>（或浏览器空闲时）以 <code>flushPassiveEffects()</code> 统一执行。</li>
+    <li>setup：cleanup 执行<b>之后</b>，也在同一个 <code>flushPassiveEffects()</code> 中执行。</li>
+  </ul>
+  <p><b>3. deps 没变 → cleanup 不执行：</b>D7 讲过，updateEffectImpl 中 <code>areHookInputsEqual(nextDeps, prevDeps)</code> 为 true → 不给 effect 打 <code>HookPassive</code> 的 flag → commit 阶段不会调度这个 effect。</p>
+  <div class="followup"><span class="label">追问：</span>useLayoutEffect 的 cleanup 在什么时候执行？</div>
+</div>
+</details>
+<details><summary>追问答案</summary>
+<div class="answer">
+  <p><b>在 Mutation 阶段末尾</b>（DOM 已更新、但浏览器还没渲染这个新 frame），<code>commitMutationEffectsOnFiber</code> 遍历 effect 链表，找到 tag 含 <code>HookLayout | HookHasEffect</code> 的 effect，执行其 cleanup。然后立即在 <b>Layout 阶段</b>执行 setup。整个过程在 <code>commitRoot</code> 中<b>同步完成</b>。这就是 useLayoutEffect 的名字来源——它布局(Layout)阶段的副作用在浏览器渲染新帧前就执行了。</p>
+  <p>useEffect 的 cleanup 是在 Mutation 阶段<b>之后</b>异步调度到宏任务中。</p>
+</div>
+</details>
+</div>
+
+<!-- Q6 -->
+<div class="qcard">
+<div class="qheader">
+  <span class="qnum t3">Q6</span>
+  <div class="qbody">
+    <div class="qtitle">diff 中 <code>lastPlacedIndex</code> 是怎么工作的？如果 key 相同但 type 不同, React 怎么处理？</div>
+    <div class="qtags"><span class="qt">D3</span><span class="qt">D1</span></div>
+    <div class="qdesc">
+      <p>给定两种序列：</p>
+<pre class="language-javascript"><code>// 旧：A(0) B(1) C(2) D(3)   数字 = oldIndex
+// 新：B C A D</code></pre>
+      <ol>
+        <li><code>lastPlacedIndex</code> 初始值是多少？</li>
+        <li>遍历新序列的每一步，lastPlacedIndex 如何变化？</li>
+        <li>哪些节点被标记为"移动"（Placement）？</li>
+        <li>如果旧列表中有个 <code>&lt;span key="A"&gt;</code> 和新序列的 <code>&lt;div key="A"&gt;</code> 匹配上了（key 相同 type 不同），React 会复用 fiber 还是新建？</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<details><summary>查看答案</summary>
+<div class="answer">
+  <div class="key"><b>源码</b>：<code>ReactChildFiber.js</code> <code>reconcileChildrenArray</code> → <code>updateSlot</code> / <code>updateFromMap</code> / <code>placeChild</code></div>
+  <p><b>1-3. lastPlacedIndex 推演：</b></p>
+  <p>旧映射：<code>{A:0, B:1, C:2, D:3}</code>，初始 <code>lastPlacedIndex = 0</code>（初始化为 0 还是 -1？注意 <code>placeChild</code> 中的 <code>lastPlacedIndex</code> 对应的是 <code>reconcileChildrenArray</code> 内的局部变量，在 <code>updateSlot</code> 处理完第一个节点后开始。实际上初始值为 <b>0</b>。</p>
+<pre class="language-javascript"><code>旧 indeces: A:0  B:1  C:2  D:3
+                             lastPlacedIndex
+step1 B(1): 1 &lt; 0? false → lastPlacedIndex = 1    不移动
+step2 C(2): 2 &lt; 1? false → lastPlacedIndex = 2    不移动
+step3 A(0): 0 &lt; 2? true  → lastPlacedIndex = 2    A 标记 Placement（移动）
+step4 D(3): 3 &lt; 2? false → lastPlacedIndex = 3    不移动
+</code></pre>
+  <p><b>只有 A 被标记为移动</b>（Placement）。输出时新序列中 A 会被放到 D 前面。</p>
+  <p><b>4. key 同 type 不同的情况：</b></p>
+  <ul>
+    <li>第一轮 <code>updateSlot</code> 中用 <code>updateElement</code>：检查 <code>current.type === newChild.type</code> → type 不同 → 返回 <code>null</code>（不匹配）</li>
+    <li>进入<b>第二轮</b>：<code>mapRemainingChildren</code> 建 <code>existingChildren</code> 的 Map，<code>updateFromMap</code> 用 key=A 找到旧 fiber</li>
+    <li>即使 key 找到了，在 <code>updateFromMap</code> 中再次比 type（<code>oldFiber.type !== newChild.type</code>）→ 决定<b>不复用</b></li>
+    <li>旧 fiber 被标记为 <code>Deletion</code>（删除），新 fiber 重新 <code>createFiberFromElement</code></li>
+  </ul>
+  <p>所以<b>不会复用 fiber</b>——key 帮你定位到了旧节点，但 type 不同 tell React"这已经不是同一个东西了"。</p>
+  <div class="followup"><span class="label">追问：</span>不复用 fiber 意味着什么代价？</div>
+</div>
+</details>
+<details><summary>追问答案</summary>
+<div class="answer">
+  <p>意味着<b>所有内部状态丢失</b>：旧的 fiber.memoizedState 上挂的 hooks 链表（useState/useRef/useEffect 的所有内部状态）被丢弃，新 fiber 从头 mount 走 mount 流程。所以"key 相同就万事大吉"是不对的——type 不同也会导致卸载重装，正式生产场景下这会导致 input 失焦、展开折叠等交互异常。</p>
+</div>
+</details>
+</div>
+
+<!-- Q7 -->
+<div class="qcard">
+<div class="qheader">
+  <span class="qnum t1">Q7</span>
+  <div class="qbody">
+    <div class="qtitle"><code>requestUpdateLane</code> 中 <code>claimNextTransitionUpdateLane</code> 的轮转计数怎么工作的？为什么需要"轮转"？</div>
+    <div class="qtags"><span class="qt">D10</span></div>
+    <div class="qdesc">
+      <p>源码中有一个全局变量 <code>nextTransitionUpdateLane</code>，初始值是 <code>TransitionLane1</code>。每次 transition update 都通过 <code>claimNextTransitionUpdateLane()</code> 领车道。</p>
+<pre class="language-javascript"><code>export function claimNextTransitionUpdateLane() {
+  const lane = nextTransitionUpdateLane;
+  nextTransitionUpdateLane <<= 1;
+  if ((nextTransitionUpdateLane & TransitionUpdateLanes) === NoLanes) {
+    nextTransitionUpdateLane = TransitionLane1;
+  }
+  return lane;
+}</code></pre>
+      <ol>
+        <li>这个计数器是怎么"轮转"的？</li>
+        <li>如果连续触发 20 次 transition，第 1 次和第 15 次的 lane 会不会冲突（相同的 lane）？</li>
+        <li>为什么要设计成"轮转"而非每次都从同一条 lane 开始？</li>
+      </ol>
+    </div>
+  </div>
+</div>
+<details><summary>查看答案</summary>
+<div class="answer">
+  <div class="key"><b>源码</b>：<code>ReactFiberLane.js</code> <code>claimNextTransitionUpdateLane</code>，<code>TransitionUpdateLanes</code> 常量</div>
+  <p><b>1. 轮转机制：</b></p>
+  <ul>
+    <li>初始 <code>nextTransitionUpdateLane = TransitionLane1</code>（假设值 1024，即 0b100_0000_0000）</li>
+    <li>每次调用：返回当前值 → <code>next <<= 1</code>（左移一位）→ 如果移出了 <code>TransitionUpdateLanes</code> 的位范围（即超出了最高位），重置为 <code>TransitionLane1</code></li>
+    <li>举例：假设 <code>TransitionUpdateLanes = 0b1111_1110_0000_0000</code>（14 条车道），lane1=1024(0x200)，lane2=2048(0x400)，…，lane14。左移 14 次后 lane 的最高位超出了范围 → 绕回 lane1</li>
+  </ul>
+  <p><b>2. 第 1 次和第 15 次冲突？</b>会。正好一轮回到开头，两者拿到同一条 lane。但 <b>React 允许 lane 重叠</b>——lane 只是优先级标记，同一条 lane 上的多个 update 在同一个 render 中会被一起处理（update 队列里有不同的 payload，它们合并即可）。冲突不会丢数据，只是失去了"错开"的优化效果。</p>
+  <p><b>3. 为什么要轮转（不是每次都从 lane1 开始）：</b></p>
+  <ul>
+    <li>如果每次都从 lane1 开始，多次连续的 transition 全挤在 lane1 上，<code>getNextLanes</code> 把它们视为同一批，不会单独调度。</li>
+    <li>轮转让相邻 transition **尽量错开出多条车道**，虽然优先级一样，但 <code>getNextLanes</code> 中 <code>includesSomeLane(renderLanes, pendingLanes)</code> 的位运算更容易选出"一批独立车道"。在极端场景下，错开的 lane 可以更好地支持嵌套 transition 的独立调度。</li>
+    <li>本质是：<b>随机化（均匀分配）以避免同一条道上拥堵</b>。</li>
+  </ul>
+  <div class="followup"><span class="label">追问：</span>transition 的 lane 优先级一样的（都是 TransitionLanes 范围内），那"第几条车道"的意义是什么？</div>
+</div>
+</details>
+<details><summary>追问答案</summary>
+<div class="answer">
+  <p>同一优先级范围内，不同的 lane 位仍然有语义。从位运算看：<code>TransitionLanes</code> 是一段连续位（<code>0b0000000001111111111111100000000</code>），每一位代表同优先级的一个"批次号"。<code>getNextLanes</code> 的 <code>getHighestPriorityLane</code> 取最低位，但 <code>includesSomeLane(renderLanes, pendingLanes)</code> 会<b>一次性选中所有 pending 的 TransitionLanes</b>（因为它们优先级相同，没必要分先后）。轮转让连续多次 transition 落在不同位上，在 <code>mergeLanes</code> 冒泡到 root 时表现为多位 pending，不影响渲染但提高了<b>后续被独立调度</b>的可能性——比如你中途 <code>useDeferredValue</code> 产生了一条新的 deferred update，它的 transition lane 可能与前面一条未完成的不同，React 可以只渲染新的而不重跑旧的。</p>
+</div>
+</details>
+</div>
+
+<!-- Q8 -->
+<div class="qcard">
+<div class="qheader">
+  <span class="qnum t3">Q8</span>
+  <div class="qbody">
+    <div class="qtitle">用一句话描述"setState → 用户看到更新"的全过程，串联 D1-D10</div>
+    <div class="qtags"><span class="qt">全 D1-D10</span></div>
+  </div>
+</div>
+<details><summary>查看答案</summary>
+<div class="answer">
+  <div class="key"><b>这是最难的题——能完整说清才说明真的懂了</b></div>
+  <p>标准答案分 5 步：</p>
+  <ol>
+    <li><b>触发 + 入队（D6+D10）</b>：<code>setState</code> 调 <code>dispatchSetState</code> → 创建 <code>update{ lane, action }</code> 入队到 hook.queue 环链 → <code>requestUpdateLane</code> 按上下文算出这条 update 的 lane（Sync/Default/Transition等）→ <code>markUpdateLaneFromFiberToRoot</code> 沿 return 链用 <code>mergeLanes</code> 标 fiber.lanes 和沿途 parent.childLanes → 最终 <code>root.pendingLanes |= lane</code></li>
+    <li><b>调度（D10）</b>：<code>scheduleUpdateOnFiber</code> → <code>ensureRootIsScheduled</code>（批处理后）→ <code>getNextLanes</code> 用 <code>getHighestPriorityLane</code> 从 pendingLanes 中选本轮 renderLanes → 按结果启动 <code>workLoopSync</code>（SyncLane）或 <code>workLoopConcurrent</code>（TransitionLane）</li>
+    <li><b>Render 阶段（D1-D4+D10）</b>：beginWork 开头的 <code>includesSomeLane(renderLanes, childLanes)</code> 做 bailout 剪枝 → 进入的 fiber 过 <code>reconcileChildren</code> diff 子节点 → hook 阶段 <code>updateReducer</code> 中 <code>isSubsetOfLanes(renderLanes, updateLane)</code> 过滤掉不在此批次内的 update（跳过保留）→ completeWork 做 dom 属性 diff + <code>bubbleProperties</code> 汇总 childLanes → 如果 concurrent 模式下 <code>shouldYield()</code> 为 true 就中断保留 wip 指针；高优先级插队则直接丢弃 wip</li>
+    <li><b>Commit 阶段（D5+D7）</b>：wip 完整后进入 <code>commitRoot</code> → beforeMutation（被动收集）→ Mutation（真正改 DOM + root.current = finishedWork 切指针）→ Layout（useLayoutEffect 同步）→ commit 结束后异步调度 useEffect cleanup+setup</li>
+    <li><b>收尾（D10）</b>：<code>markRootFinished</code> 用 <code>removeLanes</code> 从 root.pendingLanes 中清除已完成的 lane → 检查是否有余留的 pending（低优先级被跳过的）→ 有的话重新调度 → 没有的话下次触发更新再走一遍</li>
+  </ol>
+  <p>能把这条链说清楚，每一步能说出至少一个函数名、一个源码文件、一个核心机制（位运算/链表/双缓存），这 10 天就没白学。</p>
+  <div class="followup"><span class="label">提示：</span>其中 D1（JSX→Element）和 D8（Ref/Memo/Callback）在这个管线里的"出场点"分别是哪一步？</div>
+</div>
+</details>
+<details><summary>追问答案</summary>
+<div class="answer">
+  <p><b>D1（JSX→Element）</b>出现在 Render 阶段最上游：beginWork 的 <code>updateClassComponent/updateFunctionComponent</code> 内部执行你的函数组件 <code>App(props)</code> → 返回的 <code>JSX</code> 被编译成 <code>React.createElement</code> 调用 → 产出 Element 描述对象 → 这个 Element 的 <code>type</code> 和 <code>props</code> 被传入 <code>reconcileChildren</code> 做 diff。</p>
+  <p><b>D8（Ref/Memo/Callback）</b>出现在两个地方：</p>
+  <ul>
+    <li>Render 阶段的 hook 链表：useRef 的 <code>memoizedState = {current: value}</code> 跨 render 保持引用；useMemo/useCallback 在 deps 不变时直接 <code>return prevState</code>（bailout 在 hook 粒度）</li>
+    <li>beginWork 的 <code>updateFunctionComponent</code> 外部：如果 fiber 是 <code>MemoComponent</code> tag，beginWork 中会先做 <code>shallowEqual(oldProps, newProps)</code> —— deps 没变就直接 bailout 子树（D4 提到的那条完整 bailout 路径）。</li>
+  </ul>
+</div>
+</details>
+</div>
+
+<div class="footer">
+  共 8 题 · 覆盖 D1-D10 · 2026-06-24<br>
+  每题都有追问，全答清等于真的掌握了 React 源码
+</div>
+
+<hr style="border:none;border-top:1px solid var(--border);margin:32px 0;">
+
+<h2 style="font-size:15px;font-weight:600;margin:0 0 16px;">口述版速记 · 每道题面试怎么答</h2>
+<p style="font-size:12px;color:var(--text3);margin-bottom:20px;">每题 3-5 句，把源码细节浓缩成面试话。</p>
+
+<div class="qcard">
+<div class="qheader"><span class="qnum">Q1</span><div class="qbody"><div class="qtitle">alternate 的创建与双缓存关联</div></div></div>
+<details><summary>口述答案</summary>
+<div class="answer">
+  <p>fiber 节点初始化时 alternate 为 null。首次 render 时 root 调 createWorkInProgress 创建 wip 树，current.alternate=wip、wip.alternate=current 双向互指。子 fiber 中旧树上有的节点复用 alternate（也双向互指），旧树上没有的新节点 alternate=null。这就是双缓存的配对——两棵树一一对应，commit 时 root.current=finshedWork 原子切换。</p>
+</div>
+</details>
+</div>
+
+<div class="qcard">
+<div class="qheader"><span class="qnum t2">Q2</span><div class="qbody"><div class="qtitle">bailout 条件 + context 为何穿透 memo</div></div></div>
+<details><summary>口述答案</summary>
+<div class="answer">
+  <p>bailout 需要三条同时满足：props 引用不变、&& !includesSomeLane(renderLanes, fiber.lanes)、&& !includesSomeLane(renderLanes, fiber.childLanes)。三者都成立时整棵子树跳过。<br><br>context 穿透 memo 的原因：Provider 改值后，propagateContextChanges 遍历所有注册了依赖的消费者 fiber，直接改 fiber.lanes。React.memo 只保证 props 引用不变，但拦不住 lanes 被外部写——bailout 失败。所以 context 消费者一定会重渲染，跟写没写 memo 无关。</p>
+</div>
+</details>
+</div>
+
+<div class="qcard">
+<div class="qheader"><span class="qnum t3">Q3</span><div class="qbody"><div class="qtitle">同一事件中多次 setState</div></div></div>
+<details><summary>口述答案</summary>
+<div class="answer">
+  <p>同一 macro/micro task 中多次 setState，scheduleUpdateOnFiber 会合并为一次 render，n=2、m=1。核心是 update 链表按序应用：setN(1)→setM(1)→setN(2) 最终结果 n=2、m=1。flushSync 可以强制跳出批处理，中间夹一个 flushSync 就变成两次 render。跨 transition 边界时，transition 内的 update 和外面的 update 各自调度、两次 render。</p>
+</div>
+</details>
+</div>
+
+<div class="qcard">
+<div class="qheader"><span class="qnum t1">Q4</span><div class="qbody"><div class="qtitle">并发中断 + wip 处置</div></div></div>
+<details><summary>口述答案</summary>
+<div class="answer">
+  <p>workLoopConcurrent 每处理一个 fiber 问 shouldYield()。分两种情况：时间片到期→shouldYield 为 true→暂停、保留 workInProgress 指针，下次续跑；高优先级更新进来→prepareFreshStack 把 workInProgress 置 null→wip 整棵丢弃、新建 wip。低优先级 update 从未丢失：它们留在 hook.queue 里，root.pendingLanes 也保留了它们的 lane。commit 完成后 getNextLanes 再次选中它们，从头再走一遍 render。</p>
+</div>
+</details>
+</div>
+
+<div class="qcard">
+<div class="qheader"><span class="qnum t2">Q5</span><div class="qbody"><div class="qtitle">effect 执行时机 + deps 不变的情况</div></div></div>
+<details><summary>口述答案</summary>
+<div class="answer">
+  <p>fiber 的 flag 经过 completeWork 的 bubbleProperties 向上汇总,commit 阶段靠 subtreeFlags 找到有活的子树。effect 链表中 tag 字段存 HookFlags 决定类型。useEffect 的 cleanup 在 commit 后 flushPassiveEffects 中异步执行（Mutation 阶段末尾调度、Layout 阶段之后真正执行），setup 紧接 cleanup 之后。useLayoutEffect 的 cleanup 在 Mutation 阶段末尾同步、setup 在 Layout 阶段同步执行。deps 没变时 cleanup 和 setup 都不执行——compare 为 true 就不打 HookHasEffect flag,不入调度。</p>
+</div>
+</details>
+</div>
+
+<div class="qcard">
+<div class="qheader"><span class="qnum t3">Q6</span><div class="qbody"><div class="qtitle">diff + lastPlacedIndex + key 同 type 不同</div></div></div>
+<details><summary>口述答案</summary>
+<div class="answer">
+  <p>lastPlacedIndex 从 0 开始,遍历新序列时:当前节点旧索引≥lastPlacedIndex→不移动,更新 lastPlacedIndex;旧索引&lt;lastPlacedIndex→标记 Placement 右移。多节点 diff 分两轮:首轮处理可复用序列(从头对齐 key+type),次轮 mapRemainingChildren+updateFromMap 处理剩余 key。key 相同但 type 不同:不复用,旧 fiber 标记 Deletion 删除,新 fiber 走 createFiberFromElement 重新创建。后果是内部状态丢失。</p>
+</div>
+</details>
+</div>
+
+<div class="qcard">
+<div class="qheader"><span class="qnum t3">Q7</span><div class="qbody"><div class="qtitle">transition lane 轮转计数</div></div></div>
+<details><summary>口述答案</summary>
+<div class="answer">
+  <p>claimNextTransitionUpdateLane 维护一个全局变量 nextTransitionUpdateLane,初始为 TransitionLane1。每次调用:返回当前值→左移一位→如果超出 TransitionUpdateLanes 的位范围就绕回 TransitionLane1。目的是让多次连续的 transition 尽量错开到不同车道上,避免全挤在同一条 lane 上。如果连续 15 次 transition,第 1 次和第 15 次会拿到同一条 lane——但不会丢数据,只是失去了错开的优化效果。</p>
+</div>
+</details>
+</div>
+
+<div class="qcard">
+<div class="qheader"><span class="qnum t1">Q8</span><div class="qbody"><div class="qtitle">一条完整管线串联</div></div></div>
+<details><summary>口述答案</summary>
+<div class="answer">
+  <p>完整管线分五步:①setState 触发→requestUpdateLane 按上下文算 lane→mergeLanes 沿 return 链冒泡标 fiber.lanes/childLanes→root.pendingLanes 合并。②getNextLanes 用 getHighestPriorityLane 选本轮 renderLanes→启动 workLoopSync 或 workLoopConcurrent。③beginWork 用 includesSomeLane 做 bailout→进入的 fiber reconcileChildren 做 diff→hooks 阶段 isSubsetOfLanes 过滤 update→completeWork 汇总→shouldYield 可中断。④commitRoot:beforeMutation→Mutation(改 DOM+切指针)→Layout(useLayoutEffect)→后置调度 useEffect。⑤markRootFinished 用 removeLanes 清除已完成的 lane→余留 pending 再调度→没有就等下次触发。D1 的 JSX→Element 在 beginWork 的 updateFunctionComponent 中被调用,D8 的 memo 在 beginWork 开头做 shallowEqual 判 bailout。</p>
+</div>
+</details>
+</div>
+
+</div>
+
+</body>
+</html>
