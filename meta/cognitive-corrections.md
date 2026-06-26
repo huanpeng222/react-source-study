@@ -253,6 +253,21 @@
 65. **我以为** lane 是某处算好存起来的固定值、只有"有活的"fiber 才有。
     **其实** lane 是每次更新触发时由 `requestUpdateLane` 按上下文当场算的；且**每个 FiberNode 构造时就有 `lanes`+`childLanes` 两字段**（`ReactFiber.js` L174-175，初始 NoLanes=0），`lanes`=自己欠的、`childLanes`=子树欠的（冒泡汇总，是 beginWork bailout 整棵跳过的依据）。
 
+66. **我以为** Suspense 是"检测 promise 状态然后切换显示"（类似轮询）。
+    **其实** Suspense 是**被动响应**——组件在 render 中执行到 `resource.read()` 时**主动 throw promise**出去，被 `performUnitOfWork` 的 try-catch 接住，再由 `throwException` 沿 return 链向上找 Suspense 边界处理。React 不去"检查"promise 状态，是 promise 自己"飞"出来的。（Day11 入场 Q1 纠错）
+
+67. **我以为** promise reject 后不会触发重试（只监听 resolve）。
+    **其实** `attachPingListener` 写的是 `wakeable.then(ping, ping)`——**resolve 和 reject 都调同一个 ping 回调**。reject 时 ping 触发重试后，组件重新执行发现 throw 的是 Error 而非 pending promise，Error 冒泡给 Error Boundary 处理。不调的话失败的请求永远卡在 fallback。（Day11 微检查点2 纠错）
+
+68. **我以为** OffscreenComponent 的作用就是 CSS `display:none` 隐藏 DOM。
+    **其实** Offscreen 比 display:none 更强——它不只隐藏 DOM，**JS 层面的 hooks 状态、effect 链表、用户输入、局部变量全部内存封存**。切回来时不需要重新执行组件函数，直接复用旧 fiber。零成本恢复。（Day11 微检查点4 纠错）
+
+69. **我以为** `use(promise)` 是 React 19 的一套全新机制绕开了 Suspense/throw。
+    **其实** `use()` 底层最终还是 `throw promise`，走的完全同一套 Suspense 路径。它的价值在于封装了 status 判断逻辑 + 允许在条件语句和循环中使用（手动 throw 会跳出整个函数体）+ 不用自己包 resource 对象 + 幂等（同一 promise 多次 use 只 throw 一次）。（Day11 微检查点6 纠错）
+
+70. **我以为** React 会缓存数据获取的结果。
+    **其实缓存不是 React 做的。** `use()` 只往 promise 对象本身挂 `.status`/`.value`/`.reason`；保证两次 render 拿到**同一个 promise 引用**是你的责任——通过 Map 缓存 / RTK Query / SWR / Relay 做。如果每次 render 都 `new Promise()` 则 use 每次都发现 status=undefined → 无限循环 throw。（Day11 追问深入）
+
 ---
 
 <!-- 后续 Day 的认知纠正继续追加在这里 -->

@@ -414,11 +414,33 @@ function use(promise) {
 
 ---
 
-## 九、我之前以为 …，其实是 …（5 条认知纠正，跟练后回填）
+## 九、我之前以为 …，其实是 …（5 条认知纠正）
 
-（学完后回填）
+**1. 我之前以为 Suspense 是"检测 promise 状态然后切换显示"，其实是"组件主动 throw → 被接住 → 向上找边界处理"。**
+Suspense 不是轮询机制——它不会去检查 promise 的状态。是组件在 render 中执行到 `resource.read()` 时**自己 throw 出去的**，然后被 `performUnitOfWork` 的 try-catch 接住，再路由给 Suspense 边界。
+
+**2. 我之前以为 reject 不会触发重试，其实是 resolve 和 reject 都调 ping()。**
+`attachPingListener(wakeable.then(ping, ping))` —— reject 也调 ping 是为了重新试一次让 Error Boundary 接住错误，否则失败的请求会永远卡在 fallback 状态。
+
+**3. 我之前以为 OffscreenComponent 就是 CSS display:none，其实它连 JS 计算都省了。**
+不只是 DOM 不渲染——hooks 状态、effect 链、用户输入全部内存封存。切回来时不需要重新执行组件函数，直接复用旧 fiber。比 display:none 更强。
+
+**4. 我之前以为 use(promise) 是一套新机制绕开了 Suspense，其实底层还是 throw promise。**
+use 内部最终还是 `throw promise`，走的完全同一套路径。它的价值在于封装了 status 判断 + 允许在条件语句/循环中使用 + 不用自包资源对象。
+
+**5. 我之前以为 React 会缓存数据，其实缓存不是 React 做的。**
+use 只往 promise 对象上挂 `.status`/`.value`；保证两次 render 拿到同一个 promise 引用是你的责任——通过 Map 缓存、RTK Query、SWR 或 Relay 做。
 
 ---
+
+### 9.5 入场自测对答表
+
+| 题 | 学习者答案 | 判定 | 关键修正 |
+|---|---|---|---|
+| Q1 Suspense 怎么捕获 | "通过获取 promise 状态，pending 展示 fallback/rejected 展示 error" | ⚠️ 方向对 | 不是"获取状态"——是被 try-catch 接住 throw，沿 return 链找 Suspense 边界 |
+| Q2 重试从哪开始 | "不清楚" | — | 教程已讲：从头重 render primary child 子树（非断点续跑） |
+| Q3 vs Error Boundary | "ErrorBoundary 捕获 Error, Suspense 处理请求类 fallback" | ⚠️ 漏本质 | 共享同一套 try-catch+throwException+向上查找架构，只是抛出物和处理者不同 |
+| Q4 use(promise) | "不清楚" | — | 教程已讲：底层还是 throw promise，多了条件语句可用/不包资源/幂等 |
 
 > 🔍 微检查点总回顾（建议逐个口头回答，不要翻看上面的内容）：
 >
@@ -432,6 +454,42 @@ function use(promise) {
 
 ---
 
-## 十、明天预告
+### 9.6 微检查点逐个判定
+
+| 检查点 | 判定 | 备注 |
+|---|---|---|
+| ① 区分 promise/Error | ✅ | `typeof value.then === 'function'` |
+| ② ping 回调 | ✅ | 补：reject 也 ping 是为了让 ErrorBoundary 接住 |
+| ③ beginWork 三分支 | ✅ | ShouldCapture / previousState===Suspended / 正常 |
+| ④ OffscreenComponent | ⚠️ 偏 | 补：不只隐藏 DOM，JS 状态/hook/effect 全保留不重算 |
+| ⑤ 重试不再 throw | ✅ | 数据库缓存了结果，同参数返回同一 promise 引用 |
+| ⑥ use 多了什么 | ⚠️ 不全 | 补：条件语句可用 + 不用包资源 + 幂等 |
+| ⑦ 共享与区别 | ✅ | 同一 catch+入口+查找模式；抛出物/处理者/结果不同 |
+
+**总计：5 全对 / 2 小偏（OffscreenComponent 描述不够完整、use 优势列不全）**
+
+---
+
+## 十、动手实验
+
+详见 `demos/day11/README.md`，3 个验证点（K1/K2/K3）。
+⚠️ Suspense 的"异步暂停→恢复"核心行为依赖 Scheduler+浏览器事件循环，**jsdom 中无法完整观察**（见 observations.md 边界声明）。本实验聚焦于可在 jsdom 中验证的行为：throw promise 不崩溃、use(promise) API 可用性、路由分流条件。
+
+### 验收清单
+
+- [x] 能说出 Suspense 解决的根本矛盾（同步 render vs 异步数据）
+- [x] 能描述 throw promise → try-catch 接住 → throwException 路由的完整链路
+- [x] 能写出 `typeof value.then === 'function'` 这个判断条件
+- [x] 能说清 attachPingListener 的 ping 回调做了什么
+- [x] 能讲 beginWork 遇到 SuspenseComponent 三个分支
+- [x] 知道 OffscreenComponent 不只隐藏 DOM 还保留 JS 状态
+- [x] 能解释 use(promise) 底层还是 throw promise 以及它多出的三个好处
+- [x] 能对比 Suspense 和 Error Boundary 的共享与区别
+- [x] 完成 3 个概念验证实验
+- [x] 写下 5 条认知纠正
+
+---
+
+## 十一、明天预告
 
 Day 12：**SuspenseList 并发模式 + 自定义 Suspense 案例（React.lazy + data fetching + use）**
