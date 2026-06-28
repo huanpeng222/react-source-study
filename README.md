@@ -17,7 +17,9 @@
 | W2 | D7 | useEffect / useLayoutEffect + effect 链表 | ✅ |
 | W2 | D8 | useRef / useMemo / useCallback | ✅ |
 | W2 | D9 | useContext 源码 + Context 穿透 memo | ✅ |
-| W3 | D10 | Lane 优先级模型 + 并发渲染 | ⏳ |
+| W3 | D10 | Lane 优先级模型 + 并发渲染 | ✅ |
+| W3 | D11 | Suspense 原理（throw promise + use + fallback） | ✅ |
+| W3 | D12 | SuspenseList + 自定义 Suspense 实战 | 📖 学习中 |
 
 完整路线见 [`meta/roadmap.md`](./meta/roadmap.md)。
 
