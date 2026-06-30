@@ -1,0 +1,25 @@
+{
+  "name": "react-source-study",
+  "version": "1.0.0",
+  "description": "> React 源码 + AI Agent 工程化学习笔记。8 周 / 40 天 · 每日实操跟练。",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/huanpeng222/react-source-study.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/huanpeng222/react-source-study/issues"
+  },
+  "homepage": "https://github.com/huanpeng222/react-source-study#readme",
+  "dependencies": {
+    "jsdom": "^22.1.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  }
+}

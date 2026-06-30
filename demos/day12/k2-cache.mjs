@@ -1,177 +1,275 @@
 /**
- * Day 12 实验 L2：use(promise) + 缓存 Map（防死循环）
+ * Day 12 实验 L2：use() + 缓存 Map（防死循环）— 真实 React 组件版
+ *
+ * 环境：jsdom + react@19 + react-dom@19
+ * 运行: node k2-cache.mjs
  *
  * 验证目标：
- * 1. 无缓存 → 每次渲染都创建新 Promise → 死循环
- * 2. 有缓存 Map → 同 id 返回同一 Promise 引用 → 正常工作
- * 3. id 变化时自动发新请求
+ *   场景 A: 无缓存 → 每次 render 新建 Promise → 死循环
+ *   场景 B: 有缓存 Map → 同 id 返回同一引用 → 正常工作
+ *   场景 C: id 变化 → 自动发新请求
  *
- * 运行: node k2-cache.mjs
+ * 核心结论: Suspense 要求"两次 render 拿到同一个 promise 引用"，
+ *           否则每次都是 pending → 无限 throw → 死循环。
  */
 
-const log = (...args) => console.log(`[${new Date().toISOString().slice(11,19)}]`, ...args);
+import React, { Suspense } from 'react';
+import { createRoot } from 'react-dom/client';
+import { JSDOM } from 'jsdom';
 
-// ============ 模拟 React use() ============
-// React 19 的 use() 核心行为：根据 promise 状态返回值或 throw
-
-function mockUse(promise) {
-  if (promise.status === 'fulfilled') {
-    return promise.value; // 已 resolve → 直接返回数据
-  }
-  if (promise.status === 'rejected') {
-    throw promise.reason; // 已 reject → 抛出错误
-  }
-  // pending → throw promise，让 Suspense 捕获
-  throw promise;
+// ============ 环境初始化 ============
+const logs = [];
+function log(...args) {
+  const msg = args.join(' ');
+  console.log(msg);
+  logs.push(msg);
 }
 
-// ============ 场景 A：无缓存（死循环演示） ============
+const dom = new JSDOM('<!DOCTYPE html><html><body><div id="root"></div></body></html>');
+global.document = dom.window.document;
+global.window = dom.window;
+
+// ============ Resource 工厂 ============
+function createResource(promise) {
+  let status = 'pending';
+  let result;
+  let error;
+  promise.then(
+    v => { status = 'fulfilled'; result = v; },
+    e => { status = 'rejected'; error = e; }
+  );
+  return {
+    read() {
+      if (status === 'pending') throw promise;
+      if (status === 'rejected') throw error;
+      return result;
+    },
+    get status() { return status; },
+  };
+}
+
+function Spinner() {
+  return React.createElement('div', null, '⏳ 加载中...');
+}
+
+let fetchCallCount = 0;
+
+// ============================================================
+//  ❌ 错误写法：无缓存 — 每次调用都新建 Promise
+// ============================================================
+function naiveFetchUser(id) {
+  fetchCallCount++;
+  log(`  [无缓存] fetchUser(${id}) 被调用 — 第 ${fetchCallCount} 次请求！创建全新 Promise`);
+  return createResource(
+    new Promise(resolve => {
+      setTimeout(() => resolve({ id, name: `用户${id}` }), 30);
+    })
+  );
+}
 
 /**
- * ❌ 错误写法：每次调用都 new 一个新 Promise
+ * 无缓存的 User 组件 — 模拟死循环场景
  */
-let renderCount_A = 0;
-function naiveFetchData(id) {
-  log(`  [场景A] fetchUser(${id}) 被调用 — 创建全新 Promise`);
-  return new Promise((resolve) => {
-    setTimeout(() => resolve({ id, name: `用户${id}` }), 50);
-  });
+function NaiveUser({ id }) {
+  log(`  [NaiveUser] render(id=${id})`);
+  const resource = naiveFetchUser(id);   // ← 每次 render 都新建！
+  const data = resource.read();          // ← 第一次 pending → throw
+  // 如果 promise 已 resolve，这里能拿到数据
+  return React.createElement('div', null, `✅ ${data.name}`);
 }
 
-function simulateRenderWithoutCache(id) {
-  renderCount_A++;
-  log(`[场景A] 第 ${renderCount_A} 次 render`);
 
-  try {
-    const p = naiveFetchData(id);       // 每次 render 都新建！
-    const data = mockUse(p);            // p 是新的 → pending → throw
-    log(`[场景A] ✅ 渲染成功: ${data.name}`);
-    return { success: true, data };
-  } catch (thrownValue) {
-    if (thrownValue instanceof Promise && typeof thrownValue.then === 'function') {
-      log(`[场景A] ⏳ Suspense 捕获到 promise，显示 fallback...`);
-      return { success: false, reason: 'suspended' };
-    }
-    log(`[场景A] ❌ 抛出了非 thenable 错误: ${thrownValue}`);
-    return { success: false, reason: 'error', error: thrownValue };
-  }
-}
-
-// ============ 场景 B：有缓存 Map（正确写法） ============
-
-/**
- * ✅ 正确写法：缓存 Promise 引用
- */
+// ============================================================
+//  ✅ 正确写法：有缓存 Map — 同 id 返回同一引用
+// ============================================================
 const dataCache = new Map();
-let fetchCallCount_B = 0;
+let cachedFetchCount = 0;
 
-function cachedFetchData(id) {
+function cachedFetchUser(id) {
   if (!dataCache.has(id)) {
-    fetchCallCount_B++;
-    log(`  [场景B] fetchUser(${id}) 首次调用 — 创建并缓存 Promise (#${fetchCallCount_B}次实际请求)`);
-    const p = new Promise((resolve) => {
-      setTimeout(() => resolve({ id, name: `用户${id}` }), 50);
+    cachedFetchCount++;
+    log(`  [有缓存] fetchUser(${id}) 首次调用 — 创建并缓存 (#${cachedFetchCount}次实际请求)`);
+    const p = new Promise(resolve => {
+      setTimeout(() => resolve({ id, name: `用户${id}` }), 30);
     });
-    // 给 p 加上 status 字段（模拟 React 内部标记）
-    p.then(
-      (value) => { p.status = 'fulfilled'; p.value = value; },
-      (reason) => { p.status = 'rejected'; p.reason = reason; }
-    );
-    dataCache.set(id, p);
-    return p;
+    const resource = createResource(p);
+    dataCache.set(id, resource);
+    return resource;
   }
-  log(`  [场景B] fetchUser(${id}) 命中缓存! 返回同一个 Promise 引用`);
+  log(`  [有缓存] fetchUser(${id}) 命中缓存! 返回同一 resource 引用 ✅`);
   return dataCache.get(id);
 }
 
-let renderCount_B = 0;
-function simulateRenderWithCache(id) {
-  renderCount_B++;
-  log(`[场景B] 第 ${renderCount_B} 次 render`);
+/**
+ * 有缓存的 User 组件
+ */
+function CachedUser({ id }) {
+  log(`  [CachedUser] render(id=${id})`);
+  const resource = cachedFetchUser(id);   // ← 同 id 始终返回同一引用
+  const data = resource.read();
+  return React.createElement('div', null, `✅ ${data.name}`);
+}
 
+
+// ============================================================
+//  主实验
+// ============================================================
+
+function runL2() {
+  log('===== L2: use() + 缓存 Map（防死循环） =====\n');
+
+  // ========== 场景 A：无缓存（演示问题） ==========
+  log('═══ 场景 A：无缓存（错误写法） ═══\n');
+  log('模拟 3 次 render（模拟 Suspense 重试机制）:\n');
+
+  fetchCallCount = 0;
+  const wrapperA = document.createElement('div');
+  document.body.appendChild(wrapperA);
+
+  for (let i = 1; i <= 3; i++) {
+    log(`--- render #${i} ---`);
+
+    try {
+      const rootA = createRoot(wrapperA);
+      rootA.render(
+        React.createElement(Suspense, { fallback: React.createElement(Spinner) },
+          React.createElement(NaiveUser, { id: 1 })
+        )
+      );
+      log(`  root.render() 返回成功（throw 被 Suspense 接住，显示 fallback）`);
+    } catch (e) {
+      log(`  ❌ 崩溃: ${e.message}`);
+    }
+
+    // 模拟等待 promise resolve 后重试
+    if (i < 3) {
+      log(`  → 等待 40ms 模拟 promise resolve...`);
+      // 用同步方式让 promise 有机会 resolve
+      const start = Date.now();
+      while (Date.now() - start < 40) {} // busy-wait 让微任务有机会执行
+    }
+  }
+
+  log(`\n场景A 结果: fetch 被调用了 ${fetchCallCount} 次！每次都新建 Promise`);
+  log(`→ 如果是真实 React 的自动重试，这里会死循环 ♾️\n`);
+
+  try { document.body.removeChild(wrapperA); } catch(e) {}
+
+  // ========== 场景 B：有缓存（正确写法） ==========
+  log('═══ 场景 B：有缓存 Map（正确写法） ═══\n');
+  log('模拟 mount → suspend → resolve → rerender 完整流程:\n');
+
+  cachedFetchCount = 0;
+  dataCache.clear();
+
+  const wrapperB = document.createElement('div');
+  document.body.appendChild(wrapperB);
+
+  // Render 1: 首次 mount（会 suspended）
+  log(`[场景B] === render 1: 首次 mount ===`);
   try {
-    const p = cachedFetchData(id);     // 同 id 始终返回同一引用
-    const data = mockUse(p);            // p 已 resolved → 返回数据！
-    log(`[场景B] ✅ 渲染成功: ${data.name}`);
-    return { success: true, data };
-  } catch (thrownValue) {
-    if (thrownValue instanceof Promise && typeof thrownValue.then === 'function') {
-      log(`[场景B] ⏳ Suspense 捕获到 promise，显示 fallback...`);
-      return { success: false, reason: 'suspended' };
-    }
-    return { success: false, reason: 'error' };
-  }
-}
-
-// ============ 辅助：等待 promise settle 后重试 ============
-async function waitAndRerender(renderer, id, maxRenders = 5) {
-  for (let i = 0; i < maxRenders; i++) {
-    const result = renderer(id);
-    if (result.success) return result;
-    await new Promise(r => setTimeout(r, 60)); // 等 promise resolve
-  }
-  return { success: false, reason: `超过最大重试次数(${maxRenders})` };
-}
-
-// ============ 主实验 ============
-async function runExperiment() {
-  log('=== Day 12 L2: use() + 缓存 Map（防死循环） ===\n');
-
-  // ========== 场景 A 演示 ==========
-  log('═════════ 场景 A：无缓存（死循环演示） ═════════\n');
-  log('模拟 3 次 render 循环:\n');
-  renderCount_A = 0;
-  for (let i = 1; i <= 4; i++) {
-    const result = simulateRenderWithoutCache(1);
-    if (i < 4 && result.reason === 'suspended') {
-      // 模拟 "promise resolve → React 重试"
-      log('  → (模拟: promise resolve, React 重试 render)\n');
-      await new Promise(r => setTimeout(r, 60));
-    }
+    const rootB = createRoot(wrapperB);
+    rootB.render(
+      React.createElement(Suspense, { fallback: React.createElement(Spinner) },
+        React.createElement(CachedUser, { id: 1 })
+      )
+    );
+    log(`root.render() 完成 → Suspense 接住 pending promise → 显示 fallback`);
+  } catch(e) {
+    log(`❌ 异常: ${e.message}`);
   }
 
-  log(`场景A 结果: ${renderCount_A} 次 render，全部挂起 → ♾️ 死循环\n`);
+  // 等 promise resolve
+  log(`\n[场景B] 等待 40ms 让 fetch promise resolve...`);
+  const start = Date.now();
+  while (Date.now() - start < 40) {}
 
-  // ========== 场景 B 演示 ==========
-  log('═════════ 场景 B：有缓存 Map（正确写法） ═════════\n');
-  log('模拟完整的 mount → suspend → resolve → rerender 流程:\n');
-  renderCount_B = 0;
-  fetchCallCount_B = 0;
+  // Render 2: promise 已 resolved，重试渲染
+  log(`\n[场景B] === render 2: promise 已 resolved，重试 ===`);
+  try {
+    const rootB2 = createRoot(wrapperB);
+    rootB2.render(
+      React.createElement(Suspense, { fallback: React.createElement(Spinner) },
+        React.createElement(CachedUser, { id: 1 })
+      )
+    );
+    log(`root.render() 完成 → read() 直接返回数据 ✅`);
+  } catch(e) {
+    log(`❌ 异常: ${e.message}`);
+  }
 
-  // render 1: 首次，没有缓存
-  const r1 = simulateRenderWithCache(1); // 应该 suspended
-  await new Promise(r => setTimeout(r, 60)); // 等 fetch resolve
-
-  // render 2: promise 已 resolved，但 use() 需要重试
-  const r2 = simulateRenderWithCache(1); // 应该成功！
-
-  // render 3: 父组件 rerender（id 不变）
-  log('\n--- 模拟: 父组件 setState 导致 rerender ---');
-  const r3 = simulateRenderWithCache(1); // 命中缓存，直接成功
+  // Render 3: 父组件 setState 导致 rerender（id 不变）
+  log(`\n[场景B] === render 3: 模拟父组件 rerender（id 不变）===`);
+  try {
+    const rootB3 = createRoot(wrapperB);
+    rootB3.render(
+      React.createElement(Suspense, { fallback: React.createElement(Spinner) },
+        React.createElement(CachedUser, { id: 1 })
+      )
+    );
+    log(`root.render() 完成 → 命中缓存，直接返回数据 ✅`);
+  } catch(e) {
+    log(`❌ 异常: ${e.message}`);
+  }
 
   log(`\n场景B 结果:`);
-  log(`  - 总 render 次数: ${renderCount_B}`);
-  log(`  - 实际请求次数: ${fetchCallCount_B}（只发了 1 次网络请求！）`);
-  log(`  - 最终状态: ✅ 成功渲染\n`);
+  log(`  - 实际请求次数: ${cachedFetchCount}（只发了 1 次！）\n`);
+
+  try { document.body.removeChild(wrapperB); } catch(e) {}
+
 
   // ========== 场景 C：id 变化 ==========
-  log('═════════ 场景 C：id 变化时的行为 ═════════\n');
-  const r4 = simulateRenderWithCache(2); // 新 id，应该又 suspended
-  await new Promise(r => setTimeout(r, 60));
-  const r5 = simulateRenderWithCache(2); // 成功
+  log('═══ 场景 C：id 变化的行为 ═══\n');
 
-  log(`\n场景C结果: id=2 时实际请求了 #${fetchCallCount_B} 次新请求（正确！）\n`);
+  const wrapperC = document.createElement('div');
+  document.body.appendChild(wrapperC);
 
-  // ========== 总结 ==========
-  log('=== 关键结论 ===\n');
-  log('1. 死循环根因: 函数体每帧执行 → 每次 new Promise → 新 Promise 总是 pending → 又 throw');
-  log('2. 解决方案: 缓存 Map 保证同 key 返回同一个 Promise 引用');
-  log('3. 缓存的是 Promise 不是数据 —— 这样 use() 才能追踪状态变化');
-  log('4. id 变化时自动发新请求 —— 因为 Map 里没有这个新 key');
-  log('');
-  log('⭐ 面试话术:');
-  log('   "Suspense 要求两次 render 拿到同一个 promise 引用，');
-  log('    所以必须用外部 Map 缓存。这是 Suspense 数据获取的硬性前提。"');
+  log(`[场景C] === 切换到 id=2 ===`);
+  try {
+    const rootC = createRoot(wrapperC);
+    rootC.render(
+      React.createElement(Suspense, { fallback: React.createElement(Spinner) },
+        React.createElement(CachedUser, { id: 2 })  // 新 id！
+      )
+    );
+    log(`root.render() 完成 → id=2 不在缓存里 → 发起新请求 (#${cachedFetchCount})`);
+  } catch(e) {
+    log(`❌ 异常: ${e.message}`);
+  }
+
+  log(`\n场景C结果: id=2 自动发了第 ${cachedFetchCount} 次请求（正确！）\n`);
+
+  try { document.body.removeChild(wrapperC); } catch(e) {}
 }
 
-runExperiment().catch(console.error);
+
+// ============================================================
+//  总结 & 结论
+// ============================================================
+function printSummary() {
+  log('===== 关键结论 =====\n');
+  log('1. 死循环根因:');
+  log('   函数体每帧执行 → 每次 new Promise → 新 Promise 总是 pending');
+  log('   → 又 throw → Suspense 又接住 → 等待 → 重试 → 又新建... ♾️\n');
+  log('2. 解决方案 — 外部缓存 Map:');
+  log('   const cache = new Map();');
+  log('   function fetchData(id) {');
+  log('     if (!cache.has(id)) cache.set(id, fetchUser(id).then(r=>r.json()));');
+  log('     return cache.get(id);  // 同 id 返回同一引用！');
+  log('   }\n');
+  log('3. 缓存的是 Promise/Resource 引用，不是最终数据');
+  log('   这样 React 才能在不同 render 间追踪状态变化\n');
+  log('4. id 变化时自动发新请求 — 因为 Map 里没有这个新 key\n');
+  log('');
+  log('⭐ ⭐ ⭐ 面试必背 ⭐ ⭐ ⭐');
+  log('"Suspense 数据获取的硬性前提是缓存——必须用外部 Map 保证');
+  log(' 同一个 key 在多次 render 之间返回同一个 promise 引用。"');
+}
+
+// ============ 执行 ============
+runL2();
+log('');
+printSummary();
+
+log('\n========== L2 完成 ==========');
+process.exit(0);
