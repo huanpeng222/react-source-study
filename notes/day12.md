@@ -2,7 +2,7 @@
 
 > 日期：2026-06-28
 > 主题：SuspenseList 的多边界协调、自定义 Suspense 数据获取模式、React.lazy + use() 完整案例
-> 状态：📖 学习中
+> 状态：✅ 已完成（含 L1/L2/L3 三组实验）
 > 源码出处：
 > - `packages/react-reconciler/src/ReactFiberBeginWork.js`（updateSuspenseListComponent）
 > - `packages/react-reconciler/src/ReactFiberCommitWork.js`（commitSuspenseList）
