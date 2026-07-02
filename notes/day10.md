@@ -2,7 +2,7 @@
 
 > 日期：2026-06-23
 > 主题：React 18+ 用 Lane 位掩码表达优先级，实现可中断、可插队的并发渲染
-> 状态：📖 学习中
+> 状态：✅ 已完成
 > 源码出处（已 WebFetch 核对 facebook/react main）：
 > - `packages/react-reconciler/src/ReactFiberLane.js`（Lane 常量 + 工具函数）
 > - `packages/react-reconciler/src/ReactFiberWorkLoop.js`（workLoopConcurrent / shouldYield）

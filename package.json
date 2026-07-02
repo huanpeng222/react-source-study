@@ -1,6 +1,7 @@
 {
   "name": "react-source-study",
   "version": "1.0.0",
+  "type": "module",
   "description": "> React 源码 + AI Agent 工程化学习笔记。8 周 / 40 天 · 每日实操跟练。",
   "main": "index.js",
   "scripts": {
