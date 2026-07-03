@@ -19,7 +19,12 @@
 | W2 | D9 | useContext 源码 + Context 穿透 memo | ✅ |
 | W3 | D10 | Lane 优先级模型 + 并发渲染 | ✅ |
 | W3 | D11 | Suspense 原理（throw promise + use + fallback） | ✅ |
-| W3 | D12 | SuspenseList + 自定义 Suspense 实战 | 📖 学习中 |
+| W3 | D12 | SuspenseList + 自定义 Suspense 实战 | ✅ |
+| W3 | D13 | React 19 Actions 体系（useActionState/useFormStatus/useOptimistic） | ✅ |
+| W3 | D14 | React Compiler + 性能优化深度（bailout/memo 体系） | ✅ |
+| W4 | D15 | 状态管理库源码对比（Context 陷阱/Zustand/Jotai） | ✅ |
+| W4 | D16 | React Server Components 原理 | ✅ |
+| W4 | D17 | Next.js App Router 架构深度解析 | ✅ |
 
 完整路线见 [`meta/roadmap.md`](./meta/roadmap.md)。
 
