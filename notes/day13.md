@@ -829,7 +829,20 @@ React 19 新特性体系:
 
 ---
 
-## 九、我之前以为 …，其实是 …（跟练后回填）
+## 九、入场自测对答（跟练后回填）
+
+| 题 | 问题 | 学习者回答 | 判定 |
+|---|---|---|---|
+| Q1 | 表单提交旧写法痛点 | 用 button/onSubmit 提交 | 🟡 偏——知道入口，但没说出痛点（preventDefault/loading/error 手动管理） |
+| Q2 | action 函数是什么？async 怎么处理 | 不清楚 | ❌ 不懂——今天核心内容 |
+| Q3 | useOptimistic vs 手写乐观更新区别 | 先更新再请求，回滚不好操作 | ✅ 方向对——直觉正确，缺自动回滚机制认知 |
+| Q4 | RSC vs SSR 根本区别 | SSR 返回 HTML，RSC 还是 React 组件 | ✅ 对——抓到关键区别，深度不够 |
+
+**总评：1 对 1 偏 2 不懂** —— 典型 Day13 起步状态。
+
+---
+
+## 十、微检查点判定（跟练中回填）
 
 1. **我以为** Actions 就是把 `onSubmit` 换了个名字——**其实** Actions 是一套完整的异步状态管理体系（transition + error + pending），`<form action={fn}>` 只是入口。
 2. **我以为** `useActionState` 就是 `useReducer` 的别名——**其实** 它支持 async 函数、内置 isPending、自动走 transition Lane，是全新的 Hook。

@@ -1,5 +1,8 @@
 # Day18 — Next.js 进阶：Parallel Routes / Intercepting Routes / Middleware / 环境隔离
 
+> ⚠️ **支线标注（2026-07-03 追加）**：`meta/roadmap.md` 核对后确认 Next.js 系列（本篇 + Day17）**不在原 8 周 / 40 天 roadmap 范围内**。原 roadmap 的 W4（D16-D20）主题是"状态库源码"，D17 和 D18 被另一台电脑接力时带偏成了 Next.js App Router 专题。
+> 决定：D17/D18 内容保留在仓库（当作 Next.js 专题支线，先暂停），主线从下一天起拉回原 roadmap 缺口（Scheduler / useTransition / useDeferredValue / 高优先级打断实战 / 自研 mini-store）。Next.js 专题后续会单独开一轮学习，不再占用当前 DayN 编号。
+>
 > 日期：2026-07-03
 > 主题：并行路由（Slots）、拦截路由（模态框深链接）、Middleware（Edge 层拦截）、server-only/client-only 的"毒药包"机制
 > 状态：📖 教程完成，待跟练

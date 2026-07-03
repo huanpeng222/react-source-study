@@ -757,6 +757,21 @@ function Child({ data, onClick }) {
 
 ---
 
+## 八点五、入场自测对答 & 微检查点判定
+
+### 入场自测回答
+
+| 题 | 学习者回答 | 判定 |
+|---|---|---|
+| Q1 | memo 减少重渲染，useMemo/useCallback 减少重复计算 | ✅ 方向对 |
+| Q2 | 新旧 props 引用地址都没变 | 🟡 偏（漏了原始类型比值 + 返回true=不重渲染的语义陷阱） |
+| Q3 | heavyData 每次重算 + VeryHeavyComponent 缺 memo → 加 React.memo | ✅ 找到 2 个问题（漏了 handleClick 每次新建 + onClick 导致子组件 memo 失效） |
+| Q4 | （未答） | — |
+
+**判定：2 对 1 偏 1 未答**
+
+---
+
 ## 九、验收清单
 
 - [ ] 能说出 React.memo 的比较函数返回值的含义（true = skip）
