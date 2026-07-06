@@ -24,6 +24,21 @@
 
 ---
 
+## 零点五、入场自测点评（2026-07-06 首次跟练）
+
+> 学习者首答记录，作为 Step6 首尾呼应对比用。
+
+| 题 | 学习者答案 | 判定 | 关键补充 |
+|---|---|---|---|
+| Q1 shouldYield 是什么 | "判断浏览器线程中是否有优先级更高的需求要执行" | ⚠️ **方向偏** | 把"任务调度顺序"（最小堆按 expirationTime 排）和"时间片让出"（shouldYield 计时）两个概念混了。shouldYield **不看优先级**，只回答"这一轮唤醒后连续跑够 5ms 没"。且漏了 Day10 shouldYield = reconciler 对 Scheduler 包 shouldYieldToHost 的转发包装 |
+| Q2 为什么不用 rIC | "有被动性的存在" | ✅ 抓到核心 | "被动性"= 触发时机由浏览器空闲决定，React 控制不了。补：Safari 不支持 + deadline 长度不可控 |
+| Q3 为什么 MessageChannel | "setTimeout 有最低 4ms 损耗，MessageChannel 优先级更高" | ✅ 正确 | 精确说是"嵌套 setTimeout 超过一定层数被 clamp 到最低 4ms"，MessageChannel 走宏任务队列无此限制 |
+| Q4 谁先跑 | "按优先级来算" | ✅ 正确 | 满分需补机制：优先级→timeout→expirationTime→同一最小堆按 expirationTime 排序，堆顶最紧急 |
+
+**核心薄弱点**：Q1 暴露了"调度顺序 vs 时间片让出"这两个概念的混淆——这正是本篇要讲透的分工。
+
+---
+
 ## 一、先搞清楚 Scheduler 是谁、不是谁
 
 ### 1.1 一个常见的误解
@@ -131,6 +146,9 @@ var expirationTime = startTime + timeout;
 `workLoop` 每次开始工作前，都会调用 `advanceTimers(currentTime)`——检查 `timerQueue` 堆顶的任务是否 `startTime <= currentTime` 已经到点了，到点就把它从 `timerQueue` 弹出，`push` 进 `taskQueue`。这就是"延迟任务 → 就绪任务"的转移机制。
 
 > 📌 **微检查点 1**：如果 `timerQueue` 里有一个任务 A 的 `startTime` 是 100ms 后，`taskQueue` 里已经有一个任务 B 在排队且正在执行中，A 到点后会打断 B 的执行吗？（提示：想想 `advanceTimers` 是什么时候被调用的）
+>
+> **学习者首答（2026-07-06）**："不会打断，因为 B 已经在执行中，且超过了最晚开始时间。"
+> **点评**：✅ 结论对（不会打断），但**理由不准**。真正原因不是"B 超过了最晚开始时间"，而是 **Scheduler 没有抢占能力**——`advanceTimers` 只在每次 `workLoop` 循环开始/`handleTimeout` 时被调用，A 从 timerQueue 转正进 taskQueue 只是"排进队列"，能不能轮到它还要等 B 让出（B 跑完 or B 时间片到了主动 break）。Scheduler 是**协作式调度**（cooperative），不是**抢占式**（preemptive）——到点的任务不能强行打断正在跑的任务，只能等下一个调度间隙。
 
 ---
 
@@ -284,13 +302,28 @@ function workLoop(initialTime) {
 
 > ⚠️ **判断顺序很重要**：`currentTask.expirationTime > currentTime && shouldYieldToHost()`——**先判断任务是否已经过期**，只有在"没过期"的前提下才会问"该不该让出"。如果任务已经过期（`expirationTime <= currentTime`），**不会调用 `shouldYieldToHost`**，会强制继续执行，不管时间片用了多久。这是为了避免"高优先级任务因为时间片耗尽而被无限期推迟"。
 
+> 💬 **跟练追问（2026-07-06）**："执行超过 5ms 时任务还没结束，还会让出主线程吗？"
+> **答**：分两种情况——
+> - **任务没过期**：`&&` 左边 true → 调 `shouldYieldToHost()` → 返 true → break 让出（正常 5ms 时间片行为）。
+> - **任务已过期**：`&&` 左边 false → **短路，`shouldYieldToHost` 根本不被调用** → 不 break → 强制继续跑完，哪怕已连续跑 50ms 也不停。
+> **为什么**：过期 = 已经迟到，无视 5ms 强制跑完，是防止高优先级任务被时间片反复推迟"饿死"的兜底。宁可这一帧超 5ms 卡一下，也不让过期任务无限延后。
+> **补充**：`shouldYieldToHost` 内部第一行还有 `needsPaint` 提前返回——浏览器急着绘制时，没到 5ms 也会提前让出；但这条只在"任务没过期"（会走到调用 shouldYield）时才有机会触发。
+
 ### 6.3 "续体函数"是什么——这才是可中断渲染的关键
 
 `workLoop` 执行 `callback(didUserCallbackTimeout)` 后，如果返回值**还是一个函数**（`continuationCallback`），Scheduler 会把它重新存回 `currentTask.callback`，**任务留在队列里不删除**，然后**立即** `return true` 让出（不管还剩多少时间片，注释原文写的是 "regardless of how much time is left"）。
 
 > 💡 **这正是 React reconciler 里"可中断渲染"的实现基础**：`performConcurrentWorkOnRoot` 这类 reconciler 函数，如果在被打断时还没渲染完，就会 `return performConcurrentWorkOnRoot.bind(...)`（返回自身的绑定版本）——Scheduler 看到这是个函数，就知道"这个任务只做了一部分，下次从这继续"，而不是重新从头跑一遍。Day10 讲的"高优先级打断后 wip 重做"和这里的"续体"是两个不同的机制：续体是"同优先级任务分片执行"，Day10 的重做是"更高优先级插队导致旧的 render 阶段作废"。
 
+> 📌 **微检查点 3（跟练追加）**：既然 Scheduler 是协作式、不能抢占，那"高优先级更新打断低优先级渲染"是怎么发生的？打断的是什么？
+>
+> **学习者首答（2026-07-06）**："在当前抢占到执行的任务执行结束后主动让出线程，打断的是协调（reconcile）过程，此时还没到 Scheduler 阶段。"
+> **点评**：✅ "打断的是 reconcile 过程（render 阶段的 Fiber 遍历）"完全正确。❌ 但"此时还没到 Scheduler 阶段"说反了——**Scheduler 恰恰是打断的驱动者**。完整链路：低优先级 render 在 `workLoopConcurrent` 里每处理完一个 Fiber 就调 `shouldYield()`（=Scheduler 的 shouldYieldToHost）→ 返回 true 就 break，reconciler 函数返回"续体"给 Scheduler → Scheduler 让出主线程 → 高优先级 setState 触发新调度、算出更小的 expirationTime 排到堆顶 → 下一轮 `workLoop` peek 到的是高优先级任务 → 它先跑 → 高优先级 commit 后，之前那个低优先级 wip 树因为 renderLanes 变了而**作废重来**（不是接着续体跑）。所以：**打断的动作发生在"两个 Fiber 之间的 yield 间隙"，而这个间隙正是 Scheduler 的 shouldYield 制造的**，不是"没到 Scheduler"，而是"全程靠 Scheduler 撑着"。
+
 > 📌 **微检查点 2**：如果一个任务的 callback 执行完之后，返回的不是函数而是 `undefined`，`workLoop` 会怎么处理这个任务？
+>
+> **学习者首答（2026-07-06）**："默认这个任务已经执行完了，下次走到时直接跳过。"
+> **点评**：⚠️ 结论对（任务算完成、会出队），但**时机搞错了**——不是"下次走到时才跳过"，而是**本轮当场 `pop` 出队**。看源码 `workLoop`：callback 返回非函数时立刻走 `else` 分支 `if (currentTask === peek(taskQueue)) pop(taskQueue)`，同步删除。你说的"下次走到直接跳过"描述的是**另一种情况**——`unstable_cancelCallback` 把 `callback` 置为 `null` 的软删除（§九 Q3），那种才是"留在堆里，等下次遍历到发现 callback 是 null 再 pop 丢弃"。两个场景别混：**正常执行完 = 当场 pop**；**被取消 = 置 null 延迟清理**。
 
 ---
 
