@@ -31,7 +31,9 @@
 
 > ⚠️ **2026-07-03 核对发现**：D17、D18 是跨电脑接力时带偏的 **Next.js 框架专题**，不在 `meta/roadmap.md` 的原 8 周主线内。内容保留在仓库供参考，后续会单独开一轮 Next.js 学习，不再占用主线 DayN 编号。**主线已从 D19 起拉回 roadmap 缺口**：Scheduler（原 D12，已完成）→ useTransition/useDeferredValue（原 D14，已完成）→ 高优先级打断实战（原 D15）→ 自研 mini-store（原 D20）。
 
-完整路线见 [`meta/roadmap.md`](./meta/roadmap.md)。
+> 🎯 **2026-07-07 计划重排**：学习者当前处于求职状态（缓冲期>6个月，目标一线城市前端全栈/AI复合型岗位），每天可投入8小时全职冲刺。**Day21 及以后的执行依据改为 [`meta/job-sprint-plan.md`](./meta/job-sprint-plan.md)**，不再是 `meta/roadmap.md` 原表格。核心变化：D21-D24 收尾并发渲染+mini-store+模拟面试；D25-D34 用一个真实可部署的 AI 全栈项目替代"自研mini-react+自研Agent SDK"两个纯理论深度项目；D35-D37 简历与面试材料就位；D38起边投递边补短板。原 roadmap 保留存档参考。
+
+完整路线见 [`meta/roadmap.md`](./meta/roadmap.md)（Day1-20 历史依据）+ [`meta/job-sprint-plan.md`](./meta/job-sprint-plan.md)（Day21+ 现行依据）。
 
 ---
 

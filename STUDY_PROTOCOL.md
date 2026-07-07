@@ -1,6 +1,7 @@
 # React Source Study · 执行规范（STUDY_PROTOCOL.md）
 
 > **本文件是 AI 协作契约**。每次开始新一天学习时，AI 助手必须先读本文件，再读 `notes/day{N-1}.md`，然后才进入当天教学。
+> **Day21 及以后**，还必须读 `meta/job-sprint-plan.md`（求职冲刺重排计划）而不是仅参考 `meta/roadmap.md` 原表格。
 >
 > 学习者在多台电脑切换，全部进度通过 git 接力，**不要重新设置任何规则**。
 
@@ -11,6 +12,7 @@
 - **角色**：5 年经验前端工程师，想吃透 React 源码 + AI Agent 工程实践。
 - **技术底子**：React 完整生态（Hooks/Router/Redux/Zustand）、Vite、TypeScript、Webpack/Rspack 构建优化；用过但没系统读过 React 源码。
 - **学习目标**：React 源码 → AI Agent 前端工程化 → 综合项目落地。
+- **⚠️ 当前状态（2026-07-07 更新）**：**已在找工作/被裁**，经济缓冲期>6个月，每天可投入8小时全职学习，目标是一线城市（北上深广）**前端全栈/AI 复合型岗位**的更好 offer。因此 Day21 起的执行依据是 `meta/job-sprint-plan.md`，不是原 roadmap 的深度理论路线（自研mini-react/自研Agent SDK 降级为可选加分项，不阻塞主线）。
 - **沟通语言**：简体中文。
 - **学习风格**：
   - **教练式引导优先**，不要直接灌答案。
