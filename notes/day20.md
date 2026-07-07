@@ -293,6 +293,35 @@ lane 换算成 Scheduler 认识的优先级 → 排进最小堆（Day19）
 
 ---
 
+## 六点六、跟练追问记录二（2026-07-07）
+
+> **追问原文**："startTransition 内如果没有 useState 的相关逻辑时，是不是此时 useTransition 是不生效的？"
+
+**先给结论**：机制本身**永远生效**（挂牌子/摘牌子、isPending 切换都是无条件执行的），但如果 callback 里没有任何 setState、也不是返回 Promise 的 async 函数，这次"挂牌子"就没有任何实际更新可以被降级，**效果上等于"啥也没发生"，但不是机制失效**。
+
+**源码证据**（`startTransition` 本体，已核实）：isPending 的两次切换操作的是 `useTransition` 自己内部专属的 state 队列（`mountTransition` 时绑定好的 `fiber`/`queue`），跟 `callback()` 内部有没有调用别的 `setState` 是两条完全不相干的线：
+
+```js
+dispatchOptimisticSetState(fiber, false, queue, pendingState);  // 进入前同步设 isPending=true，跟 callback 内容无关
+try {
+  var returnValue = callback();   // 不管里面有没有 setState，都会执行
+} finally {
+  dispatchSetStateInternal(fiber, queue, finishedState, ...);   // callback 跑完后设回 false，也跟 callback 内容无关
+}
+```
+
+**一个重要例外——callback 是返回 Promise 的 async 函数时**：即使完全没有 setState（比如纯粹发个请求、等它完成），`isPending` 也会一直保持 `true`，直到这个 Promise resolve 才变回 `false`（源码里通过 `chainThenableValue` 把"变回 false"这个动作"链"在返回的 Promise 后面）。这正是 React 19 Actions 场景的核心用法——`useTransition` 常用来管理"纯异步操作"，不需要有 setState。
+
+| 场景 | isPending 会不会变化 | "低优先级"有没有意义 |
+|---|---|---|
+| callback 同步且无 setState | 会：true→false 完整走一遍 | 没有意义（没有更新可降级），但机制没坏 |
+| callback 同步且有 setState | 会 | 有意义——setState 引发的渲染被标记成 TransitionLane |
+| callback 是 async 函数返回 Promise（不管有没有 setState） | 会，但 false 要等 Promise resolve 才发生 | 有意义——Actions 场景核心用法 |
+
+> 📌 **微检查点**：如果 callback 是一个 async 函数但**没有 await 任何东西**（同步执行完就返回一个已经 resolved 的 Promise），isPending 会"长时间挂着 true"还是"几乎立刻变回 false"？
+
+---
+
 ## 七、入场自测完整对答记录（历史存档）
 
 | 题                               | 学习者回答                 | 判定                                                                                   |
