@@ -270,5 +270,20 @@
 
 ---
 
+71. **我以为** shouldYield 是判断"有没有更高优先级需求"。
+    **其实** shouldYield 只判断"这一轮连续跑够 5ms 没"，跟优先级完全无关。优先级竞争在最小堆排序（机制①：按 expirationTime 排）里就已经解决了，是两套独立机制。（Day19 微检查点1 纠错）
+
+72. **我以为** 到点的延迟任务能打断正在执行的任务。
+    **其实** Scheduler 是**协作式调度**，没有抢占能力。到点任务只是从 timerQueue 转正进 taskQueue，排进堆里等着，还得等当前正在跑的任务自己让出（跑完 or 时间片到 break）才有机会被 peek 到。（Day19 微检查点1 纠错）
+
+73. **我以为** 返回 undefined 的任务要"下次走到时才跳过"。
+    **其实**是**当场 pop 出队**（`if (currentTask === peek(taskQueue)) pop(taskQueue)`，同步执行）。"下次遍历到才跳过"说的是另一种情况——`unstable_cancelCallback` 把 callback 置为 null 的软删除，那才是延迟清理，两者不能混。（Day19 微检查点2 纠错）
+
+74. **我以为** "高优先级打断低优先级"发生在 reconcile 阶段，这时候"还没到 Scheduler"。
+    **其实** Scheduler 全程驱动打断——reconcile 每处理完一个 Fiber 就调 shouldYield（Scheduler 机制②）让出间隙，让高优任务能在最小堆里插队排到堆顶（Scheduler 机制①），下轮 workLoop 才会 peek 到它。没有 Scheduler 制造的让出间隙，打断根本无从发生。（Day19 微检查点3 纠错）
+
+75. **我以为** 5ms 是绝对的时间片上限，任务跑多久都会被强制切走。
+    **其实**只对"没过期"的任务有效。`workLoop` 的让出条件是 `expirationTime > currentTime && shouldYieldToHost()`——任务一旦过期，`&&` 左边为 false 直接短路，shouldYieldToHost 根本不会被调用，任务会强制跑完，哪怕已经连续跑了 50ms。这是防止高优先级任务被时间片反复推迟"饿死"的兜底设计。（Day19 §六 纠错）
+
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
 
