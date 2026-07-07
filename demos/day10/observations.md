@@ -1,5 +1,25 @@
 # Day 10 实测记录（observations.md）
 
+> ⚠️ **2026-07-07 更新**：README.md 已改为 Vite/浏览器版实验（学习者要求 demo 是真实可跑的 React 组件，不是 jsdom 脚本）。下面的 jsdom 实测记录**作为历史参照保留**（结论没有变化，只是这次改成让学习者在浏览器里亲自验证）。跑完浏览器版后，把真实结果填进最下方"浏览器版实测记录"区块。
+
+## 浏览器版实测记录（待填）
+
+### K1：点击按钮后新增了几条 render 日志？
+
+（待填）
+
+### K2：直接更新 / transition 更新的 isPending 变化序列分别是？
+
+（待填）
+
+### K3：敲一个字符后 console 打印了几次？deferred 是否慢一拍？
+
+（待填）
+
+---
+
+## jsdom 版历史记录（2026-06-23，保留作参照）
+
 > 环境：`/Users/guest_1/.workbuddy/binaries/node/workspace`，react@19.2.7 / react-dom@19.2.7 / jsdom@29.1.1，node 22.22.2。
 > 实测日期：2026-06-23。所有输出为真实运行结果，README 的"预期"由此回填。
 

@@ -1,41 +1,155 @@
-# Day20 实验说明 — useTransition / useDeferredValue
+# Day 20 实验：useTransition / useDeferredValue
 
-> ⚠️ **本次实验遵循 2026-07-07 流程调整（见 STUDY_PROTOCOL.md 必做 #10）**：
-> 以下三个实验脚本由 AI 直接写出（真实可跑的 React 代码，用真实的 `useTransition`/`useDeferredValue`/`startTransition` API，不是原生 JS 模拟逻辑），**尚未在本机预跑过**。README 里的"预期"是基于 `notes/day20.md` 里核实过的源码逻辑推理得出的，明确标注为"推理预期，未验证"。
->
-> **请学习者自己跑一遍**（本机 jsdom 脚本，或迁移到你自己的真实 React 项目里跑），把真实输出记录进 `observations.md`。如果真实结果和这里的预期不一致，告诉我，我会去本地复现、核实真实原因，再回来修正 `notes/day20.md` 里的结论——不会凭嘴硬解释。
+> 代码贴进 Vite + React playground（浏览器里跑），配合 React DevTools Profiler 观察 isPending 变化和渲染时序。
 
-## 环境
-
-```
-react@19.2.7 + react-dom@19.2.7 + jsdom（工作区：/Users/guest_1/.workbuddy/binaries/node/workspace）
-```
-
-## 实验列表
-
-| 实验 | 脚本 | 验证目标 |
-|---|---|---|
-| T1 | `t1-transition-pending.mjs` | `startTransition` 包裹的 setState 是否真的引发 isPending 的 true→false 变化序列 |
-| T2 | `t2-interrupt.mjs` | 高优先级更新和 transition 更新同时发起时，最终结果以哪个为准 |
-| T3 | `t3-deferred-skip.mjs` | `useDeferredValue` 在"渲染本身已是低优先级（transition 内）"场景下是否跳过二次延迟 |
-
-## 运行方式
+## 环境准备
 
 ```bash
 cd demos/day20
-NODE_PATH=/Users/guest_1/.workbuddy/binaries/node/workspace/node_modules \
-/Users/guest_1/.workbuddy/binaries/node/versions/22.22.2/bin/node t1-transition-pending.mjs
-
-# T2、T3 同理，把脚本名换掉即可
+npm create vite@latest playground -- --template react
+cd playground
+npm install
+npm run dev
 ```
 
-## ⚠️ 已知的 jsdom 环境限制（实验前先知道，别被结果"惊到"）
+---
 
-参考 Day11/Day12 的 `observations.md` 先例，jsdom 缺少真实浏览器的事件循环和 Scheduler 的 MessageChannel 时间片机制，`act()` 会把调度过程"压平"同步执行。这意味着：
+## 实验 T1：startTransition 的 isPending 变化序列
 
-- **能验证**：最终渲染结果的正确性（比如 T2 里高优先级更新最终生效）、isPending 状态是否真的发生了变化、deferredValue 是否真的追上了新值。
-- **不能验证**：真实的时间片让出时机、渲染进行到一半被打断的中间过程（这类观察需要真实浏览器 + React DevTools Profiler，Day12 已经给过浏览器版操作指引，可以复用同样的思路自己在真实项目里跑一遍）。
+```jsx
+import { useState, useTransition } from 'react';
 
-## 跑完之后
+function heavyCompute(n) {
+  let sum = 0;
+  for (let i = 0; i < n; i++) sum += i;
+  return sum;
+}
 
-把每个脚本的真实输出（直接复制终端打印内容）填进 `observations.md` 对应位置，再补一句"和预期是否一致"。如果不一致，先别急着改结论，把真实输出发给我，我来复现核实。
+export default function App() {
+  const [n, setN] = useState(0);
+  const [isPending, startTransition] = useTransition();
+
+  const heavy = heavyCompute(50000000); // 故意做得慢一点，方便观察 isPending 的"中间态"
+  console.log(`[render] n=${n} isPending=${isPending}`);
+
+  return (
+    <div style={{ padding: 20 }}>
+      <p>n={n}, isPending={String(isPending)}</p>
+      <button onClick={() => setN(v => v + 1)}>直接 setN（不走 transition）</button>
+      <button onClick={() => startTransition(() => setN(v => v + 1))}>startTransition 包裹的 setN</button>
+    </div>
+  );
+}
+```
+
+**操作步骤**：
+1. 点击"直接 setN"按钮，观察 Console 打印的渲染序列——`isPending` 是否始终是 `false`（没有 pending 阶段）。
+2. 点击"startTransition 包裹的 setN"按钮，观察是否先打印一次 `isPending=true`（n 还是旧值），过一会儿再打印一次 `isPending=false`（n 已经是新值）。
+
+**记录到 observations.md**：直接 setN 是否只有 1 次渲染、isPending 全程 false？transition 版是否出现了 isPending 从 true 变回 false 的两阶段？
+
+---
+
+## 实验 T2：transition 更新与紧急更新同时发起，谁最终生效
+
+```jsx
+import { useState, useTransition } from 'react';
+
+export default function App() {
+  const [n, setN] = useState(0);
+  const [isPending, startTransition] = useTransition();
+
+  console.log(`[render] n=${n} isPending=${isPending}`);
+
+  function handleBothAtOnce() {
+    startTransition(() => setN(1));   // 先发起一个"不急"的更新
+    setN(2);                          // 紧接着发起一个"紧急"的更新
+  }
+
+  return (
+    <div style={{ padding: 20 }}>
+      <p>n={n}</p>
+      <button onClick={handleBothAtOnce}>同时触发 transition(setN(1)) 和 直接setN(2)</button>
+    </div>
+  );
+}
+```
+
+**操作步骤**：点击按钮，观察 Console 打印的渲染序列，以及最终页面显示的 `n` 是 1 还是 2。
+
+**记录到 observations.md**：最终 n 的值是多少？是否符合"更高优先级（直接 setN）的结果最终生效"的预期？中间是否出现过 n=1 的可见渲染？
+
+---
+
+## 实验 T3：useDeferredValue 在紧急渲染 vs transition 渲染中的表现差异
+
+```jsx
+import { useState, useDeferredValue, useTransition } from 'react';
+
+// 场景A：普通同步更新
+function AppA() {
+  const [text, setText] = useState('');
+  const deferred = useDeferredValue(text);
+  console.log(`[AppA render] text="${text}" deferred="${deferred}"`);
+  return (
+    <div>
+      <p>A: text="{text}" | deferred="{deferred}"</p>
+      <button onClick={() => setText('hello')}>直接 setText("hello")</button>
+    </div>
+  );
+}
+
+// 场景B：包在 startTransition 里的更新
+function AppB() {
+  const [text, setText] = useState('');
+  const deferred = useDeferredValue(text);
+  const [, startTransition] = useTransition();
+  console.log(`[AppB render] text="${text}" deferred="${deferred}"`);
+  return (
+    <div>
+      <p>B: text="{text}" | deferred="{deferred}"</p>
+      <button onClick={() => startTransition(() => setText('world'))}>
+        用 startTransition 包裹 setText("world")
+      </button>
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <div style={{ padding: 20 }}>
+      <h3>场景 A：普通同步更新中的 useDeferredValue</h3>
+      <AppA />
+      <hr />
+      <h3>场景 B：transition 更新中的 useDeferredValue</h3>
+      <AppB />
+    </div>
+  );
+}
+```
+
+**操作步骤**：
+1. 点击场景 A 的按钮，观察 Console：是否出现两次渲染——先 `deferred=""`（旧值），紧接着 `deferred="hello"`（追上新值）。
+2. 点击场景 B 的按钮，观察 Console：`deferred` 是否**直接**变成 `"world"`，没有出现中间的空字符串渲染（因为这次更新本身已经是低优先级，`renderLanes & 42 === 0`，不需要二次延迟）。
+
+**记录到 observations.md**：场景 A 是否真的出现"旧值→新值"两阶段？场景 B 是否真的"一步到位"，没有中间态？这两者的差异是否验证了 `notes/day20.md` 里"当前渲染已是低优先级就不用二次延迟"的结论？
+
+---
+
+## 一句话收束
+
+| 实验 | 要观察的现象 | 对应机制 |
+|---|---|---|
+| T1 | transition 更新前后 isPending 有 true→false 变化，直接更新没有 | useTransition 内部挂了一个独立的 isPending state |
+| T2 | 紧急更新的值最终生效，transition 的值被覆盖/合并 | Lane 优先级决定最终渲染结果，不是先到先得 |
+| T3 | 同步渲染里 deferredValue 滞后一拍，transition 渲染里不滞后 | `renderLanes & 42` 判断当前渲染是否已是低优先级 |
+
+---
+
+## 完成后
+
+```bash
+git add demos/day20 notes/day20.md
+git commit -m "W3 D20 useTransition/useDeferredValue：改写为浏览器实验(isPending变化序列/优先级覆盖/deferred延迟对比)"
+git push
+```

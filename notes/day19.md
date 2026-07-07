@@ -392,15 +392,15 @@ performConcurrentWorkOnRoot 实际执行 beginWork/completeWork（Day4 讲的）
 
 ---
 
-## 十、动手实验（写入 demos/day19/）
+## 十、动手实验（demos/day19/）
+
+三个实验都用真实的 `scheduler` 官方包（React 内部依赖的同一个包），在浏览器里跑，不需要构建工具，详见 `demos/day19/README.md`：
 
 | 实验 | 验证什么 |
 |---|---|
-| E1 | 用最小堆模拟 taskQueue，验证不同 timeout 任务的实际执行顺序是否符合 expirationTime 排序 |
-| E2 | 用真实浏览器环境对比 `setTimeout(fn, 0)` 连续嵌套调用 vs `MessageChannel.postMessage` 连续调用的实际触发间隔，验证 4ms 节流是否存在 |
-| E3 | 模拟一个"返回续体函数"的任务，观察它是否会在时间片未用完时就被立即让出 |
-
-> ⚠️ 按 STUDY_PROTOCOL 的硬规则：所有实验预期必须先本地实测，不能凭源码推断直接写"预期结果"。跟练时会先跑出真实结果再定案。
+| E1 | 用真实 `unstable_scheduleCallback` 验证不同优先级任务的实际执行顺序是否符合 expirationTime 排序（不是先来后到） |
+| E2 | 对比 `setTimeout(fn, 0)` 连续嵌套调用 vs `MessageChannel.postMessage` 连续调用的实际触发间隔，验证 4ms 节流是否存在 |
+| E3 | 用"返回续体函数"的任务，观察它是否会被拆成多段调用，段与段之间是否真的让出了主线程 |
 
 ---
 

@@ -337,13 +337,13 @@ try {
 
 ## 八、动手实验（已写入 `demos/day20/`）
 
-| 实验 | 脚本 | 验证什么 |
-| -- | -- | ------------------------------------------------------------------------------------ |
-| T1 | `t1-transition-pending.mjs` | `startTransition` 包裹的 setState 是否真的引发 isPending 的 true→false 变化序列 |
-| T2 | `t2-interrupt.mjs` | 高优先级更新和 transition 更新同时发起时，最终结果以哪个为准 |
-| T3 | `t3-deferred-skip.mjs` | `useDeferredValue` 在"当前渲染已是低优先级"场景下是否真的跳过二次延迟 |
+三个实验改为在真实 Vite + React 项目里跑（浏览器环境，能观察 isPending/DevTools Profiler，比 jsdom 更贴近真实场景），详见 `demos/day20/README.md`：
 
-> ⚠️ **2026-07-07 流程调整**：这三个脚本是真实可跑的 React 代码（用真实 API，非模拟），但**尚未本机预跑**，`demos/day20/README.md` 里的预期是基于本篇源码结论推理得出、明确标注"未验证"。请学习者自己跑一遍（本机 jsdom 或自己的真实 React 项目），把真实输出填进 `demos/day20/observations.md`。若真实结果与预期不一致，AI 会去本地复现核实、再回来修正本文档结论，不凭嘴硬解释。此流程适用于此后所有 Day 的实验（详见 STUDY_PROTOCOL.md 必做 #10）。
+| 实验 | 验证什么 |
+| -- | ------------------------------------------------------------------------------------ |
+| T1 | `startTransition` 包裹的 setState 是否真的引发 isPending 的 true→false 变化序列 |
+| T2 | 高优先级更新和 transition 更新同时发起时，最终结果以哪个为准 |
+| T3 | `useDeferredValue` 在"当前渲染已是低优先级"场景下是否真的跳过二次延迟 |
 
 ---
 

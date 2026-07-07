@@ -1,72 +1,173 @@
 # Day 10 实验：Lane 优先级 / 自动批处理 / Transition / DeferredValue
 
-> ⚠️ 所有"预期输出"均在本地 jsdom + react@19.2.7 真实跑出（见 observations.md），非凭印象。
-> 运行方式（脚本须放在 workspace 内，ESM 不认 NODE_PATH）：
-> ```bash
-> cp k*.mjs /Users/guest_1/.workbuddy/binaries/node/workspace/
-> cd /Users/guest_1/.workbuddy/binaries/node/workspace
-> /Users/guest_1/.workbuddy/binaries/node/versions/22.22.2/bin/node k1.mjs
-> ```
+> 代码贴进 Vite + React playground（浏览器里跑，配合 React DevTools / console 观察）。
+> 之前版本用 jsdom + node 脚本跑过一遍这三个实验的核心逻辑（结论未变，已在下方各实验标注"jsdom 预跑过的真实结论"作为参照），现在改成可以直接在你自己的 Vite 项目里操作、用浏览器 console 观察的版本。
 
-> ⚠️ **能测什么 / 不能测什么（重要）**
-> jsdom + node **没有真正的时间分片调度**，所以"低优先级 wIP 树被高优先级打断后丢弃重做"这种**并发中断行为观察不到**——本目录不模拟、不编造它（那部分只在 day10.md §4 讲源码机制）。
-> 这里只测**能在 jsdom 跑出确定输出**的三件事：自动批处理、transition 的 isPending、useDeferredValue 的值滞后。
+## 环境准备（如果还没有 playground）
 
----
-
-## K1 · 自动批处理：同一事件里多次 setState 只渲染一次
-
-`k1.mjs`：一个组件两个 state，在同一个 `act`（模拟同一事件回调）里连续 `setA` + `setB`，数 render 次数。
-
-**源码依据**：两次 setState 各自入队、各自 `requestUpdateLane` 拿到同一条 lane（同一事件 → 同 DefaultLane/SyncLane），`scheduleUpdateOnFiber` 在 microtask 里只调度一次 render（Day 6 自动批处理）。
-
-**实测预期（react@19.2.7）**：
-```
-[mount] renderCount = 1
-两次 setState 后 renderCount 增量 = 1     ← 关键：两次 set 只多渲染 1 次
-最终 DOM = a=1 b=1
+```bash
+cd demos/day10
+npm create vite@latest playground -- --template react
+cd playground
+npm install
+npm run dev
 ```
 
 ---
 
-## K2 · useTransition：直接更新 vs transition 更新的 isPending
+## 实验 K1：自动批处理——同一事件里多次 setState 只渲染一次
 
-`k2.mjs`：用 `useTransition` 拿到 `[isPending, startT]`，对比"直接 `_setN`"和"`startT(() => _setN)`"两条路径下 `isPending` 的渲染序列。
+把 `playground/src/App.jsx` 改成：
 
-**源码依据**：`startTransition` 设全局 transition 上下文，回调里的 setState 走 `requestUpdateLane` 时 `transition !== null` → 领 TransitionLane（低优先级）。`isPending` 由一个高优先级占位更新驱动：transition 进行中为 true，完成后回 false。
+```jsx
+import { useState } from 'react';
 
-**实测预期（react@19.2.7）**：
+let renderCount = 0;
+
+export default function App() {
+  renderCount++;
+  const [a, setA] = useState(0);
+  const [b, setB] = useState(0);
+
+  console.log(`render #${renderCount}: a=${a} b=${b}`);
+
+  function handleClick() {
+    const before = renderCount;
+    setA(x => x + 1);
+    setB(x => x + 1);
+    // 注意：这里读到的 renderCount 还是"点击前"的，因为 setA/setB 只是排队，
+    // 真正的渲染发生在这次事件处理函数结束后，所以下面这行打印的是旧值，正常
+    console.log('本次事件处理函数内, renderCount 暂未变化 =', renderCount, '(vs 点击前)', before);
+  }
+
+  return (
+    <div>
+      <p>a={a} b={b}</p>
+      <button onClick={handleClick}>同时 setA + setB</button>
+    </div>
+  );
+}
 ```
-[mount] isPending 序列 = [false]
-直接更新后 isPending 序列 = [false]              ← 直接更新，从不 pending
-transition 更新后 isPending 序列 = [true,false]  ← 先 true(过渡中) 再 false(完成)
+
+**操作步骤**：
+
+1. 打开页面，打开 DevTools Console。
+2. 记下当前 `render #N`。
+3. 点击按钮一次，观察 console 里新增了几条 `render #` 日志。
+
+**源码依据**：两次 `setState` 各自入队，`requestUpdateLane` 在同一个事件回调里拿到同一条 lane（同一事件 → 同一批优先级），React 把它们合并成一次 render（自动批处理，Day6 讲过的机制）。
+
+**jsdom 预跑过的真实结论**（react@19.2.7，作为你在浏览器验证时的参照）：
 ```
-> ⭐ 关键对比：直接 setState 全程 `false`；transition 出现 `true→false`，这就是"低优先级更新被单独调度、期间标记 pending"的可观察证据。
+两次 setState 后只多渲染 1 次（不是 2 次）
+```
+
+**记录到 observations.md**：点击一次按钮，新增了几条 `render #` 日志？是 1 条还是 2 条？
 
 ---
 
-## K3 · useDeferredValue：deferred 值滞后于源值
+## 实验 K2：useTransition——直接更新 vs transition 更新的 isPending
 
-`k3.mjs`：`const deferred = useDeferredValue(text)`，setText('a') 后打印每次渲染的 `(text, deferred)`。
+```jsx
+import { useState, useTransition } from 'react';
 
-**源码依据**（`ReactFiberHooks.js` updateDeferredValueImpl）：紧急更新先返回**旧的 deferred 值** + 调度一个低优先级更新去追新；低优先级轮到时再返回新值。所以一次 setText 会触发**两次渲染**。
+export default function App() {
+  const [n, setN] = useState(0);
+  const [isPending, startTransition] = useTransition();
 
-**实测预期（react@19.2.7）**：
+  console.log(`render: n=${n} isPending=${isPending}`);
+
+  function handleDirect() {
+    setN(v => v + 1);
+  }
+
+  function handleTransition() {
+    startTransition(() => {
+      setN(v => v + 1);
+    });
+  }
+
+  return (
+    <div>
+      <p>n={n} isPending={String(isPending)}</p>
+      <button onClick={handleDirect}>直接更新</button>
+      <button onClick={handleTransition}>transition 更新</button>
+    </div>
+  );
+}
 ```
-[mount] 渲染序列: text="" deferred=""
-setText("a") 后渲染序列:
-    text="a" deferred=""      ← 第1次：text 已更新，deferred 仍是旧值 ""
-    text="a" deferred="a"     ← 第2次：低优先级追上，deferred 变 "a"
-最终 DOM = text=a deferred=a
+
+**操作步骤**：
+
+1. 打开 Console，点"直接更新"，观察打印的 `isPending` 序列。
+2. 再点"transition 更新"，观察打印的 `isPending` 序列——重点看是否出现了 `isPending=true` 的中间渲染。
+
+**源码依据**：`startTransition` 设全局 transition 标记，回调里的 `setN` 走 `requestUpdateLane` 时检测到标记 → 领一个 TransitionLane（低优先级）；`isPending` 由一次同步的占位更新驱动：进入 transition 时先设 true，回调跑完再设回 false（Day20 已详细讲过这条链路）。
+
+**jsdom 预跑过的真实结论**：
 ```
-> ⭐ 这就是 useDeferredValue 的本质：源值立刻变，deferred 慢一拍——在 jsdom 里表现为"同一次更新里多渲染一帧旧 deferred"。
+直接更新：isPending 全程 false（没有 pending 阶段）
+transition 更新：isPending 先变 true，再变回 false（可观察到过渡态）
+```
+
+> ⚠️ **浏览器和 jsdom 的关键差异**：在真实浏览器里，因为有完整的 Scheduler 时间片调度，你可能能观察到 `isPending=true` 停留一段时间（如果更新本身比较耗时）；而 jsdom 里 `act()` 会把调度过程同步压平，`isPending=true` 阶段几乎是瞬间闪过。**这正是本次改成浏览器版实验的意义**——去观察 jsdom 里看不到的真实调度时序。
+
+**记录到 observations.md**：直接更新时 isPending 变化了几次？transition 更新时呢？如果你故意让 `setN` 后面跟一个耗时的子组件（比如渲染一个很大的列表），能否更清楚地看到 pending 阶段的停留？
+
+---
+
+## 实验 K3：useDeferredValue——deferred 值滞后于源值
+
+```jsx
+import { useState, useDeferredValue } from 'react';
+
+export default function App() {
+  const [text, setText] = useState('');
+  const deferred = useDeferredValue(text);
+
+  console.log(`render: text="${text}" deferred="${deferred}"`);
+
+  return (
+    <div>
+      <input value={text} onChange={e => setText(e.target.value)} />
+      <p>text={text} | deferred={deferred}</p>
+    </div>
+  );
+}
+```
+
+**操作步骤**：
+
+1. 打开 Console，在输入框里敲一个字符。
+2. 观察打印出的渲染序列——`text` 和 `deferred` 是不是在同一次渲染里就一起变成新值，还是分成了两次渲染？
+
+**源码依据**（`updateDeferredValueImpl`，Day20 已逐行核实）：紧急更新（比如敲键盘触发的更新）先返回**旧的 deferred 值**，同时调度一个低优先级更新去追新值；低优先级更新轮到时才返回新值。所以一次 `setText` 理论上会触发两次渲染。
+
+**jsdom 预跑过的真实结论**：
+```
+setText("a") 后：
+  第1次渲染：text="a" deferred=""     ← text 已更新，deferred 仍是旧值
+  第2次渲染：text="a" deferred="a"    ← 低优先级追上，deferred 变新值
+```
+
+**记录到 observations.md**：敲一个字符后，console 打印了几次？deferred 是立刻跟上还是慢一拍？
 
 ---
 
 ## 一句话收束
 
-| 实验 | 观察到的现象 | 对应 lane 机制 |
+| 实验 | 要观察的现象 | 对应机制 |
 |---|---|---|
-| K1 | 两次 set 只渲 1 次 | 同事件同 lane → 批量调度一次 |
+| K1 | 两次 setState 只渲染 1 次 | 同事件同 lane → 批量调度一次 |
 | K2 | transition 出现 `isPending: true→false` | 低优先级更新被单独调度 |
-| K3 | deferred 比 text 慢一帧 | 紧急渲染返回旧值 + 调度低优先级追新 |
+| K3 | deferred 比 text 慢一拍 | 紧急渲染返回旧值 + 调度低优先级追新 |
+
+---
+
+## 完成后
+
+```bash
+git add demos/day10 notes/day10.md
+git commit -m "W3 D10 Lane模型：完成浏览器实验(自动批处理/isPending/deferred滞后)"
+git push
+```
