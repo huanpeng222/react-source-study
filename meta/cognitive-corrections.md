@@ -285,5 +285,8 @@
 75. **我以为** 5ms 是绝对的时间片上限，任务跑多久都会被强制切走。
     **其实**只对"没过期"的任务有效。`workLoop` 的让出条件是 `expirationTime > currentTime && shouldYieldToHost()`——任务一旦过期，`&&` 左边为 false 直接短路，shouldYieldToHost 根本不会被调用，任务会强制跑完，哪怕已经连续跑了 50ms。这是防止高优先级任务被时间片反复推迟"饿死"的兜底设计。（Day19 §六 纠错）
 
+76. **我以为** wip 树如果一直被更高优先级反复打断，低优先级更新会永远等不到、被无限期搁置。
+    **其实** 每个 lane 从第一次挂号（`scheduleTaskForRootDuringMicrotask`）就带一个不会因打断而重置的"过期时间戳"（`computeExpirationTime`：紧急类 lane 250ms，Default/Transition 类 5000ms）。一旦过期，`performWorkOnRoot` 会放弃走可打断的 `renderRootConcurrent`，转而走 `renderRootSync`——它的 `workLoopSync` 循环条件里根本没有 `shouldYield()` 检查，会强制一口气跑完并立刻提交，不管中途又出现了什么更高优先级的更新。"打断"保证响应速度，"过期"保证不会无限延迟，是同一套机制里互补的两面。（Day21 追问纠错）
+
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
 
