@@ -291,5 +291,8 @@
 77. **我以为** "高优先级更新"意味着它一定会瞬间响应、几乎无感知延迟。
     **其实** 高优先级只保证"排队顺序靠前"，不保证"渲染耗时归零"——如果这次高优先级渲染牵连的组件树很大且缺少 `React.memo` 隔离（没有 bailout 依据），依然要老老实实同步跑完这些组件的函数体，可能一样卡顿。同时，`useState` 内部的更新队列是按 lane 逐条过滤的（`updateReducerImpl`：`(renderLanes & updateLane) === updateLane` 才应用，否则跳过留着等自己的批次），所以一次 SyncLane 触发的渲染，不会连带把其他 state 里挂着 TransitionLane 的更新一起处理掉——那个 state 会继续显示上一次已提交的旧值，直到轮到它自己的批次。（Day21 追问纠错）
 
+78. **我以为** `entangleTransitions` 解决的是"同一个 startTransition 回调里，多个不同 state 的 setState 保持一致（比如 setA+setB 一起提交）"。
+    **其实** 那种场景靠的是更基础的机制——`requestTransitionLane` 内部有个全局缓存 `currentEventTransitionLane`，只在每次微任务边界才重置为 0，所以同一个事件回调里连续多次 setState 天然拿到**同一个** lane 号，压根不需要"捆绑"。`entangleTransitions`/`entangleTransitionUpdate` 真正管的是**同一个 state**（同一个 `useState`/`useReducer` 的 `queue`），被**两次独立的事件**（隔着一次事件循环，各自领到不同的 transition lane 编号）先后触发更新时，防止调度系统把这两次更新拆开处理导致顺序错乱——它操作的是单个 `queue.lanes`，不是整个 fiber 或多个不同的 state。（Day21 追问纠错，2026-07-08）
+
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
 

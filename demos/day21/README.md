@@ -117,38 +117,37 @@ if ((renderLanes & updateLane) === updateLane) {
 
 ---
 
-## 实验 I3：`entangleTransitions` 效果——同一 transition 里多个 setState 是否绑定提交
+## 实验 I3：`entangleTransitions` 效果——同一个 state 被两次独立 transition 触发，会不会乱序
+
+> ⚠️ **2026-07-08 修正**：原实验（同一 startTransition 里 setA+setB）测的其实是"lane 缓存复用"这个更基础的机制（同一事件里多次 setState 天然拿到同一个 lane），跟 `entangleTransitions` 无关。`entangleTransitions` 真正的作用场景是"**同一个 state，被两次独立的事件先后触发 transition 更新**"，已重新设计实验如下。
 
 ```jsx
 import { useState, useTransition } from 'react';
 
 export default function App() {
-  const [a, setA] = useState(0);
-  const [b, setB] = useState(0);
-  const [isPending, startTransition] = useTransition();
+  const [count, setCount] = useState(0);
+  const [, startTransition] = useTransition();
 
   function handleClick() {
-    startTransition(() => {
-      setA(v => v + 1);
-      setB(v => v + 1);
-    });
-    console.log(`[点击后立即读取] a=${a} b=${b}（这里读到的还是旧值，正常，因为 setState 是异步生效的）`);
+    // 每次点击都是"独立事件"——两次点击之间隔着一次事件循环，
+    // currentEventTransitionLane 会被重置，第二次点击会领到不同的 lane
+    startTransition(() => setCount(c => c + 1));
   }
 
-  console.log(`[render] a=${a} b=${b} isPending=${isPending}`);
+  console.log('[render] count=', count);
 
   return (
     <div style={{ padding: 20 }}>
-      <p>a={a}, b={b}, isPending={String(isPending)}</p>
-      <button onClick={handleClick}>同时更新 a 和 b（都在一个 transition 里）</button>
+      <p>count={count}</p>
+      <button onClick={handleClick}>点我（每次点击都是独立的 transition）</button>
     </div>
   );
 }
 ```
 
-**操作步骤**：多次点击按钮，观察 Console 里 `[render]` 打印的 `a` 和 `b` 是否**永远相等**（因为它们在同一个 transition 里一起递增）。如果代码有 bug 让它们不同步提交，你会在某次 render 里看到 `a` 和 `b` 不相等的中间态——这正是 `entangleTransitions` 要防止出现的情况。
+**操作步骤**：快速连续点击按钮 5 次（间隔尽量短，但仍是 5 次独立的 click 事件，不是在同一个函数里连续调用 5 次 setState）。观察 Console：`count` 打印的渲染序列是否**依次**从 1 递增到 5，没有跳号也没有乱序（比如没有出现"先渲染出 count=3，之后才渲染出 count=2"这种反直觉顺序）。
 
-**记录到 observations.md**：`a` 和 `b` 是否在所有渲染中始终保持相等？有没有出现过 `a !== b` 的中间态？
+**记录到 observations.md**：5 次点击后，`count` 的渲染序列是否严格递增、没有乱序？
 
 ---
 
@@ -158,7 +157,7 @@ export default function App() {
 |---|---|---|
 | I1 | 高优先级更新立即响应，低优先级渲染日志重复打印（被丢弃重做过） | `getNextLanes` 重新决策 + `prepareFreshStack` 丢弃 wip 树 |
 | I2 | Profiler 时间轴上高优先级 commit 排在低优先级 commit 之前 | 打断只发生在 render 阶段，commit 顺序反映最终的优先级排序结果 |
-| I3 | 同一 transition 里的多个 setState 始终一起提交，不出现中间态 | `entangleTransitions` 把这些 lane 捆绑成一批处理 |
+| I3 | 同一个 state 被多次独立 transition 触发，渲染序列严格递增不乱序 | `entangleTransitionUpdate` 把同一 queue 上先后挂着的多个 transition lane 捆绑成一批处理 |
 
 ---
 

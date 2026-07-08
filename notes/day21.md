@@ -280,29 +280,72 @@ if ((renderLanes & updateLane) === updateLane) {
 
 ## 五、`entangleTransitions`：为什么某些更新会被"捆绑"
 
-### 5.1 要解决的问题：两个 transition 各自处理，会不会互相踩
+> ⚠️ **2026-07-08 修正**：本节 5.1 最初举的例子（"同一个 startTransition 里 setA+setB"）用错了机制，已重写。那个场景靠的是另一个更基础的机制（lane 缓存复用），跟 `entangleTransitions` 无关。真正的作用场景和验证方式见下方。
 
-想象一个场景：`startTransition` 里同时触发了 `setA(1)` 和 `setB(2)`，这两个 setState 各自会拿到一个 lane，理论上它们可以被独立处理、独立提交。但如果 `setA` 先提交了，`setB` 还没提交，用户会看到 A 和 B 短暂不一致的中间状态。
+### 5.1 先排除一个常见误解：同一个 transition 回调里多次 setState，天生就是同一个 lane
 
-### 5.2 `entangleTransitions` 做的事
-
-已核实源码（`ReactFiberConcurrentUpdates.js` 对应逻辑）：
+已核实源码（`requestTransitionLane`）：
 
 ```js
-function entangleTransitions(root, fiber, lane) {
-  var queue = fiber.updateQueue;
-  if (queue !== null && (lane & 4194048) !== 0) {  // 4194048 = 全部 TransitionLanes 的掩码
-    var queueLanes = queue.lanes & root.pendingLanes;
-    lane |= queueLanes;
+function requestTransitionLane() {
+  if (currentEventTransitionLane === 0) {
+    currentEventTransitionLane = claimNextTransitionLane();  // 只在这个"事件"里第一次调用时才领新号
+  }
+  return currentEventTransitionLane;  // 之后同一事件内直接复用
+}
+```
+
+`currentEventTransitionLane` 是一个全局缓存，只在每次微任务边界（`processRootScheduleInMicrotask`）才重置为 0。所以 `startTransition(() => { setA(1); setB(2); })` 里的两次 setState **天然拿到同一个 lane 号**——不是"两个不同的号被捆在一起"，而是压根没有产生两个不同的号。这也是 I3 实验里 `a` 和 `b` 始终相等的真正原因：**保证一致的是 lane 缓存复用，不是 `entangleTransitions`**。
+
+### 5.2 真正要解决的问题：同一个 state，先后两次独立的 transition 更新，不能被拆开处理
+
+用类比讲：想象你在改同一份合同——**第一次修订**是上周提的（第一次点击触发的 transition，因为渲染慢还没来得及处理完），**第二次修订**是今天刚提的（用户又点了一次，`currentEventTransitionLane` 已经被重置，这次会 `claimNextTransitionLane()` 领到一个**新的、不同的**编号）。这两次修订落在**同一份文件**上（同一个 `useState` 的 queue）。如果调度系统只顾处理"今天这次"、把"上周那次"晾在一边不知道什么时候才处理，这份文件的更新历史就乱了。
+
+### 5.3 `entangleTransitionUpdate` 源码怎么防止这种情况
+
+已核实源码：
+
+```js
+function entangleTransitionUpdate(root, queue, lane) {
+  if ((lane & 4194048) !== 0) {          // 这次是 transition lane
+    var queueLanes = queue.lanes;         // 这个 state 自己的 queue 上，已经挂着的旧 lane
+    queueLanes &= root.pendingLanes;      // 只取"还没处理完"的那部分
+    lane |= queueLanes;                   // 新旧 lane 合并
     queue.lanes = lane;
-    markRootEntangled(root, lane);  // 把这些 lane"捆"在一起
+    markRootEntangled(root, lane);        // 记到 root.entangledLanes，强制以后必须一起处理
   }
 }
 ```
 
-翻译：如果这次更新是一个 transition（属于 `TransitionLanes` 范围），就把**这个 fiber 的 updateQueue 上已经挂着的其他 transition lane**，和这次新来的 lane 合并成一个"捆绑组"，记到 `root.entangledLanes` 上。之后 `getNextLanes` 挑选批次时，**这些被捆绑的 lane 只能作为一整批一起处理，不能只处理其中一部分**。
+**关键：这里操作的是单个 `useState`/`useReducer` 的 `queue`，不是整个组件**。它管的场景是：**同一个 state**先后被两次独立的 `startTransition`（隔着一次事件循环，领到了不同的 lane 编号）触发更新，这个 `queue` 上会同时挂着两个不同的 transition lane。`entangleTransitionUpdate` 把它们记到 `root.entangledLanes`，保证 `getNextLanes` 挑批次时，**只要选中其中一个 lane，就必须把捆绑的另一个也一起拉进这一批处理**（`prepareFreshStack` 里展开 `entangledLanes` 的逻辑就是干这个的）。
 
-> 💡 直接回答入场自测 Q4：**`entangleTransitions` 解决的是"同一个 transition 里多个 setState 触发的多个 lane，必须绑在一起同批提交，不能让用户看到其中一部分先更新、另一部分还没更新的中间态"**。这是为了保证 transition 的"原子性"体验。
+> 💡 修正后回答入场自测 Q4：**`entangleTransitions`/`entangleTransitionUpdate` 防止的是"同一个 state 先后收到两次独立的 transition 更新时，被调度系统拆成两批分开处理、打乱应用顺序"**，不是"同一次 transition 回调里的多个不同 state 保持一致"（那个由 lane 缓存复用天然保证，跟这个函数无关）。
+
+### 5.4 怎么设计实验真正验证到它（而不是验证 5.1 那个天然一致的现象）
+
+想验证 `entangleTransitions` 的效果，实验必须是**同一个 state，两次独立事件触发的 transition**，观察的不是"是否相等"，而是"**两次更新有没有被打乱顺序、其中一次有没有被无限期搭不上车**"：
+
+```jsx
+import { useState, useTransition } from 'react';
+
+export default function App() {
+  const [count, setCount] = useState(0);
+  const [, startTransition] = useTransition();
+
+  function handleClick() {
+    // 每次点击都是"独立事件"——两次点击之间隔着一次事件循环，
+    // currentEventTransitionLane 会被重置，第二次点击会领到不同的 lane
+    startTransition(() => setCount(c => c + 1));
+  }
+
+  console.log('[render] count=', count);
+  return <button onClick={handleClick}>count={count}</button>;
+}
+```
+
+**操作步骤**：快速连续点击按钮 5 次（间隔尽量短，但仍是 5 次独立的 click 事件，不是同一个回调里调 5 次 setState）。观察 Console：`count` 是否**依次**从 1 递增到 5，没有跳号也没有乱序（比如先出现 3 再出现 2 这种反直觉顺序）。如果没有 `entangleTransitions` 这层保护，理论上后面的更新可能在前面的还没提交完时就被独立处理、导致渲染顺序错乱；有了这层保护，多个针对同一个 state 的 transition lane 会被强制按批次捆绑处理，不会出现顺序错乱。
+
+**关于"其中一个失败"**：React 的更新模型里没有"某条 lane 单独失败"的概念——如果你在 `startTransition` 回调里同步 `throw`，那纯粹是 JS 控制流问题（后面的代码不会执行），跟 `entangleTransitions` 无关；如果你想测的是"一个异步操作报错、另一个操作是否正常完成"，那是 Day13 讲过的 `useActionState` 错误处理模型（`throw` 被自动捕获为 error state），是完全不同的机制，不应该混到这里验证。
 
 ---
 
