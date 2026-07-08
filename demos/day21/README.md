@@ -100,20 +100,65 @@ if ((renderLanes & updateLane) === updateLane) {
 
 > 💡 一句话总结：**"高优先级"帮你抢到了"先处理"的资格，但换不来"瞬间处理完"，也不会替你把别的低优先级更新一起搭便车处理掉——每个 state 的每条更新，只认自己那条 lane 是否在这次 `renderLanes` 里。**
 
----## 实验 I2：用 React DevTools Profiler 录制，观察 commit 时间轴
+---## 实验 I2：用 Console 记录 commit 顺序（不依赖 Profiler 面板）
 
-复用实验 I1 的代码。
+> ⚠️ **2026-07-08 修正**：原方案要求在 Profiler 面板里手动数竖条、点开看顺序，反馈"没法参考"——面板阅读门槛太高。改成纯 Console 方案：用 `useEffect`（**只在 commit 完成之后才会触发**，这是 Day5/Day7 讲过的时机）打印带序号和时间戳的日志，直接从文字输出就能看出 commit 的先后顺序，不用再操作 Profiler UI。
+
+```jsx
+import { useState, useTransition, useEffect, memo } from 'react';
+
+let commitSeq = 0; // 全局自增序号，每次 commit 完成后 +1
+
+const SlowItem = memo(function SlowItem({ id, tag }) {
+  let sum = 0;
+  for (let i = 0; i < 200000; i++) sum += i;
+  return <li>Item {id}: {sum % 100} (tag={tag})</li>;
+});
+
+export default function App() {
+  const [tag, setTag] = useState(0);
+  const [urgent, setUrgent] = useState(0);
+  const [, startTransition] = useTransition();
+
+  // ★ 关键：useEffect 只在这次 commit 真正完成之后才执行
+  //   打印出来的顺序 = 真实的 commit 先后顺序
+  useEffect(() => {
+    commitSeq++;
+    console.log(`✅ [commit #${commitSeq}] 完成于 t=${performance.now().toFixed(1)}ms | tag=${tag} urgent=${urgent}`);
+  }, [tag, urgent]);
+
+  function handleSlowUpdate() {
+    console.log(`👉 点击①低优先级，触发时 t=${performance.now().toFixed(1)}ms`);
+    startTransition(() => setTag(t => t + 1));
+  }
+
+  function handleUrgentUpdate() {
+    console.log(`👉 点击②高优先级，触发时 t=${performance.now().toFixed(1)}ms`);
+    setUrgent(u => u + 1);
+  }
+
+  const items = Array.from({ length: 300 }, (_, i) => i);
+
+  return (
+    <div style={{ padding: 20 }}>
+      <p>urgent={urgent}, tag={tag}</p>
+      <button onClick={handleSlowUpdate}>①触发低优先级更新（大列表）</button>
+      <button onClick={handleUrgentUpdate}>②在①渲染过程中快速点我（高优先级）</button>
+      <ul>{items.map(id => <SlowItem key={id} id={id} tag={tag} />)}</ul>
+    </div>
+  );
+}
+```
 
 **操作步骤**：
-1. 打开 DevTools 的 **Profiler** 面板，点击左上角的圆形"录制"按钮开始录制。
-2. 点击"①触发低优先级更新"，紧接着（渲染进行中）点击几次"②高优先级更新"。
-3. 点击"停止录制"。
-4. 观察 Profiler 面板下方的火焰图时间轴：
-   - 是否出现了**多个 commit**（面板顶部会有一排竖条，每一条代表一次 commit）？
-   - 点击每个 commit 竖条，看看它对应的耗时和触发原因（Profiler 会标注是哪个组件触发的更新）。
-   - 高优先级的 commit（урgent 计数）是否出现在低优先级 commit **之前**，即使你先点的是低优先级按钮？
+1. 清空 Console。
+2. 点击"①触发低优先级更新"。
+3. **在页面还没完全刷新完之前**（这是一个耗时渲染，肉眼能感觉到卡顿窗口），立刻点击"②"一次。
+4. 观察 Console 里 `👉 点击...` 和 `✅ [commit #...]` 这些行的**先后顺序**（不用去点开任何面板，直接看文字从上到下的顺序即可）：
+   - 两次点击的 `👉` 日志肯定是按你点击的物理顺序出现的（①先②后）。
+   - 但 `✅ [commit #N]` 完成日志呢？**如果发生了打断**，你应该看到：`👉①` → `👉②` → `✅ commit #1（urgent=1, tag 还是旧值）` → 过一会儿才出现 `✅ commit #2（tag=1）`——也就是**"点击顺序"和"commit 完成顺序"不一致，②虽然后点却先 commit 完成**。
 
-**记录到 observations.md**：Profiler 面板里一共出现了几次 commit？高优先级的 commit 是否排在了低优先级 commit 前面？
+**记录到 observations.md**：`✅ [commit #N]` 的完成顺序，是否验证了"后点击的高优先级反而先 commit 完成"？
 
 ---
 
@@ -156,7 +201,7 @@ export default function App() {
 | 实验 | 要观察的现象 | 对应机制 |
 |---|---|---|
 | I1 | 高优先级更新立即响应，低优先级渲染日志重复打印（被丢弃重做过） | `getNextLanes` 重新决策 + `prepareFreshStack` 丢弃 wip 树 |
-| I2 | Profiler 时间轴上高优先级 commit 排在低优先级 commit 之前 | 打断只发生在 render 阶段，commit 顺序反映最终的优先级排序结果 |
+| I2 | commit 完成日志(useEffect)的顺序和点击顺序不一致，后点的高优先级反而先完成 | 打断只发生在 render 阶段，commit 顺序反映最终的优先级排序结果 |
 | I3 | 同一个 state 被多次独立 transition 触发，渲染序列严格递增不乱序 | `entangleTransitionUpdate` 把同一 queue 上先后挂着的多个 transition lane 捆绑成一批处理 |
 
 ---
