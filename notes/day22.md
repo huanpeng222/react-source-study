@@ -50,6 +50,51 @@ let globalState = { count: 0 };
 
 ## 二、`useSyncExternalStore`：React 官方提供的"外部状态桥"
 
+### 2.0 先搞清楚"它是什么"——一句话定义
+
+**`useSyncExternalStore` 是 React 官方提供的一个 Hook，专门用来"订阅一个存在于 React 之外的数据源，并让这个数据源的变化能正确地触发组件重渲染"。**
+
+先弄清楚"外部"是相对于什么而言的——React 里的状态分两大类：
+
+```
+React 内部状态：useState / useReducer
+  存在哪？存在这个组件的 fiber 上（Day6 讲过 memoizedState）
+  谁能改？只能通过 React 提供的 dispatch
+  React 知道吗？知道！dispatch 本身就是在通知 React"该重渲染了"
+
+外部状态：一个普通的 JS 对象、浏览器 API、第三方库的 store
+  存在哪？存在 React 完全不知道的地方（模块级变量、浏览器全局对象等）
+  谁能改？谁都能改，随便一行赋值
+  React 知道吗？完全不知道！改了它 React 毫无反应
+```
+
+**`useSyncExternalStore` 就是专门为第二类"外部状态"设计的桥**——它让你告诉 React："这里有一个我自己管理的数据源，请你学会关心它什么时候变了。"
+
+**类比**：想象组件是家里的信箱，`useState` 管理的状态就像"你自己写便签纸往信箱里塞"——React 完全掌控，你什么时候塞纸条，React 立刻就知道。而"外部状态"像小区门口一个**独立运营的邮局**（比如 Zustand 的 store）——不受你信箱管辖。想让信箱在"邮局有新邮件"时也响铃，需要：①告诉邮局"有新邮件请通知我"（`subscribe`）②每次响铃后跑去邮局问一下"现在最新的邮件是什么"（`getSnapshot`）。这两份"说明书"就是传给 `useSyncExternalStore` 的两个参数。
+
+**三个参数**：
+
+```js
+const value = useSyncExternalStore(
+  subscribe,       // 参数1：怎么订阅——一个函数，接收listener，返回取消订阅函数
+  getSnapshot,      // 参数2：怎么读当前值——一个函数，返回当前快照
+  getServerSnapshot // 参数3（可选）：SSR场景用的快照
+);
+```
+
+对照 mini-store：
+
+```js
+function useStore(store, selector = s => s) {
+  return useSyncExternalStore(
+    store.subscribe,
+    () => selector(store.getState())
+  );
+}
+```
+
+**它帮你干的三件事**：①保证首次渲染就能拿到最新值（`getSnapshot` 在 render 阶段同步调用）②在正确的时机建立订阅和清理（内部帮你把 `subscribe` 包进 `useEffect`）③防止渲染撕裂（见下方 2.1/2.2）。**它是所有第三方状态管理库（Redux/Zustand/Jotai）能安全接入 React 18+ 并发渲染的地基**。
+
 ### 2.1 为什么不能靠开发者手写"订阅+强制刷新"
 
 在 `useSyncExternalStore` 出现之前（React 18 之前），大家会这样手写：
@@ -92,6 +137,59 @@ function forceStoreRerender(fiber) {
 关键设计：`useSyncExternalStore` 在**每次 commit 完成之后**，都会用 `checkIfSnapshotChanged` **重新读一次**当前的快照，跟渲染时读到的快照比较——**如果不一致，直接用 SyncLane 强制重渲染**，不管这次更新原本是什么优先级。这保证了"即使中间有并发渲染的空子可钻，commit 后也会立刻纠正过来"，代价是**外部 store 的更新总是被当作最高优先级处理**（这也是为什么 Zustand/Redux 的更新一般感觉比普通 `setState` 更"跟手"）。
 
 > 📌 **微检查点 1**：既然外部 store 更新永远走 SyncLane（最高优先级），那用 `useSyncExternalStore` 订阅一个"频繁变化、但不重要"的字段（比如鼠标坐标），会有什么潜在的性能问题？
+
+### 2.3 跟练追问：为什么 subscribe 要返回一个"取消订阅函数"
+
+**误解排除**：不是"每次通知完都要重新绑定"。`subscribe` 建立的是一个长期有效的登记，listener 一旦被 `listeners.add(listener)` 加进去，会一直留在名单里接收未来所有次的通知，直到主动调用返回的取消函数。
+
+**真正的原因**：这个返回值是给 `useEffect` 的清理机制用的。已核实源码：
+
+```js
+function subscribeToStore(fiber, inst, subscribe) {
+  return subscribe(function () {
+    checkIfSnapshotChanged(inst) && forceStoreRerender(fiber);
+  });
+}
+```
+
+`subscribeToStore` 这个函数**本身就是被塞进 `useEffect` 的那个副作用函数**（对应 §2.2 源码里 `mountEffect(subscribeToStore.bind(...), [subscribe])` 这一行）。React 的 `useEffect` 有个铁律（Day7 讲过）：**如果副作用函数返回一个函数，这个返回值会被当作清理函数（cleanup），在组件卸载、或依赖变化导致 effect 重新执行之前，React 会自动调用它**。
+
+完整链路：组件挂载 → `useEffect` 执行 `subscribeToStore` → 它内部调用 `subscribe(callback)` → `subscribe` 把 callback 加进 `listeners`，返回"删除这个callback"的函数 → 这个删除函数被 `subscribeToStore` 原样 `return` 出去 → 成为这次 `useEffect` 的清理函数 → 组件卸载时，React 自动调用它，把这个组件从监听名单里摘掉。
+
+**如果不返回取消订阅函数会怎样**：①内存泄漏——组件的闭包和它引用的 fiber 永远不会被垃圾回收，因为 `listeners` 这个 `Set` 一直持有引用；②更致命的是，store 之后再触发更新，还会调用"已卸载组件"的回调，`forceStoreRerender(fiber)` 会试图给一个不存在的组件强制重渲染，React 会报"Cannot update state on unmounted component"；③如果组件反复挂载/卸载（比如列表里来回切换），`listeners` 会无限增长，从不缩小。这跟 Day7 讲的"`useEffect` 返回 cleanup 撤销上一次副作用"是同一个模式，事件监听/定时器/WebSocket 的清理写法都一样。
+
+### 2.4 跟练追问：`.bind()` 那一行到底在干什么，为什么"又"塞进了 useEffect
+
+容易看错的地方：`.bind()` **不是在调用**，是在**打包一个函数**。回看 §2.2 那行：
+
+```js
+mountEffect(subscribeToStore.bind(null, fiber, getServerSnapshot, subscribe), [subscribe]);
+```
+
+`fn.bind(null, a, b, c)` 返回一个**新函数**，将来被调用时等价于执行 `fn(a, b, c)`（提前焊死参数，等以后有人"扣扳机"）。所以这行代码此刻**没有执行** `subscribeToStore`，只是生成了一个"还没执行的函数"。去掉 bind 语法糖，等价于：
+
+```js
+const effectFn = function () {
+  return subscribeToStore(fiber, getServerSnapshot, subscribe);  // 此刻还没执行
+};
+mountEffect(effectFn, [subscribe]);
+```
+
+`mountEffect` 就是 `useEffect` 挂载阶段的真实内部实现（跟 `mountState` 是 `useState` 内部实现同理）——它把 `effectFn` 记到 fiber 的 effect 链表上，**不会立刻执行**，等这次渲染 commit 完成之后，React 才在合适的时机调用它。
+
+换成你自己写代码的等价写法就不陌生了：
+
+```js
+// 你平时写的（箭头函数版）：
+useEffect(() => subscribe(callback), [subscribe]);
+
+// React源码写的（bind版，效果完全等价）：
+mountEffect(subscribeToStore.bind(null, fiber, inst, subscribe), [subscribe]);
+```
+
+**为什么源码用 bind 不用箭头函数**：纯粹是内部代码风格/性能考量（`bind` 生成的函数在某些场景下开销更小），跟业务逻辑无关，React 源码里大量这种写法。
+
+**"又"塞进 useEffect 的疑惑**：`subscribeToStore` 本身就是被设计成"useEffect 的回调函数体"，不是一个独立被随意调用的工具函数——它的存在意义就是"调用 subscribe 建立订阅，并把 subscribe 返回的取消订阅函数原样返回出去"，这个返回值最终变成这次 `useEffect` 的 cleanup（正好接上 2.3 讲的机制）。
 
 ---
 
