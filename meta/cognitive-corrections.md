@@ -288,5 +288,8 @@
 76. **我以为** wip 树如果一直被更高优先级反复打断，低优先级更新会永远等不到、被无限期搁置。
     **其实** 每个 lane 从第一次挂号（`scheduleTaskForRootDuringMicrotask`）就带一个不会因打断而重置的"过期时间戳"（`computeExpirationTime`：紧急类 lane 250ms，Default/Transition 类 5000ms）。一旦过期，`performWorkOnRoot` 会放弃走可打断的 `renderRootConcurrent`，转而走 `renderRootSync`——它的 `workLoopSync` 循环条件里根本没有 `shouldYield()` 检查，会强制一口气跑完并立刻提交，不管中途又出现了什么更高优先级的更新。"打断"保证响应速度，"过期"保证不会无限延迟，是同一套机制里互补的两面。（Day21 追问纠错）
 
+77. **我以为** "高优先级更新"意味着它一定会瞬间响应、几乎无感知延迟。
+    **其实** 高优先级只保证"排队顺序靠前"，不保证"渲染耗时归零"——如果这次高优先级渲染牵连的组件树很大且缺少 `React.memo` 隔离（没有 bailout 依据），依然要老老实实同步跑完这些组件的函数体，可能一样卡顿。同时，`useState` 内部的更新队列是按 lane 逐条过滤的（`updateReducerImpl`：`(renderLanes & updateLane) === updateLane` 才应用，否则跳过留着等自己的批次），所以一次 SyncLane 触发的渲染，不会连带把其他 state 里挂着 TransitionLane 的更新一起处理掉——那个 state 会继续显示上一次已提交的旧值，直到轮到它自己的批次。（Day21 追问纠错）
+
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
 
