@@ -29,6 +29,7 @@
 | W3 | D19 | Scheduler：最小堆任务队列 + MessageChannel 时间片（补主线 D12 缺口） | ✅ |
 | W3 | D20 | useTransition / useDeferredValue 源码级实现（补主线 D14 缺口） | ✅ |
 | 阶段A | D21 | 高优先级打断低优先级实战（getNextLanes决策/prepareFreshStack丢弃重做/entangleTransitionUpdate） | ✅ |
+| 阶段A | D22 | 自研 mini-store（useSyncExternalStore/selector细粒度/批量更新去重） | ✅ 教程完成，待跟练 |
 
 > ⚠️ **2026-07-03 核对发现**：D17、D18 是跨电脑接力时带偏的 **Next.js 框架专题**，不在 `meta/roadmap.md` 的原 8 周主线内。内容保留在仓库供参考，后续会单独开一轮 Next.js 学习，不再占用主线 DayN 编号。**主线已从 D19 起拉回 roadmap 缺口**：Scheduler（原 D12，已完成）→ useTransition/useDeferredValue（原 D14，已完成）→ 高优先级打断实战（原 D15）→ 自研 mini-store（原 D20）。
 
