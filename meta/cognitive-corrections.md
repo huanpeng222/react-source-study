@@ -300,5 +300,14 @@
 80. **我以为** mini-store 批量更新去重用 `queueMicrotask` 是因为它"能让出主线程，比 `setTimeout` 没有损耗"。
     **其实**方向反了——`queueMicrotask` 恰恰**不是**"让出"，是"当前这轮同步代码跑完、绘制/宏任务开始之前立刻执行"，比 `setTimeout`（宏任务）更快更早。"让出主线程"是 Scheduler 的 `shouldYield`（Day19）在做的事，那是把控制权交还浏览器；而 `queueMicrotask` 是"抢在下一次渲染前精确执行"，用它的真正原因是不用像 `setTimeout` 那样猜一个固定延迟时间，能在同一批同步 setState 跑完的那一刻立刻、准确地统一通知一次。（Day22 验收清单自查纠错）
 
+81. **我以为**（Day23模拟面试Q3）commit 阶段分 beginWork / completeWork / commit 三步；且不确定是"每个 fiber complete 完就 commit"还是"整棵树 complete 完统一 commit"。
+    **其实** ①beginWork/completeWork 是 **render 阶段**的两个动作，不是 commit 的子阶段；commit 真正的三子阶段是 **Before Mutation / Mutation / Layout**。②是**整棵 wip 树全部 completeWork 完**（`completeUnitOfWork` 一路回溯到 `workInProgress === null`，root 退出状态标 `RootCompleted`）**才一次性 commit**，绝不边 complete 边 commit。原因：commit 要改真实 DOM 不可打断，若散在可打断的 render 过程里会撕裂；且 commit 靠 `subtreeFlags` 剪枝，必须等 completeWork 的 `bubbleProperties` 把整棵树的 flags 冒泡完整才有效。（Day23 追问，源码核实 `completeUnitOfWork`/`performWorkOnRoot`/`commitRoot`）
+
+82. **我以为**（Day23模拟面试Q8）`isSubsetOfLanes(a, b)` 是判断"子组件 lanes 是否是父组件 lanes 的子集"（父子 fiber 关系）。
+    **其实**跟父子 fiber 完全无关（那个是 `fiber.lanes` vs `fiber.childLanes`）。`isSubsetOfLanes(set, subset)` = `(set & subset) === subset`，判断的是 **renderLanes（本趟渲染批次）** 和 **update.lane（某条更新的 lane）** 的子集关系，用在 `updateReducerImpl` 里决定"这条 update 该不该被本次渲染处理"——这正是低优先级更新被跳过、留到自己批次的底层机制。（Day23 追问）
+
+83. **我以为**（Day23模拟面试Q13）Scheduler "判断是否超过5ms" 和 "判断是否有更高优先级任务" 是两套机制，`shouldYieldToHost` 属于后者。
+    **其实**自相矛盾了——"是否超过5ms"就是 `shouldYieldToHost` 本身。正确划分：机制①**任务排序**（"谁先跑"，最小堆按 expirationTime 排，跟优先级相关）；机制②**时间片让出**（"跑多久该歇"，`shouldYieldToHost` 计时5ms，**跟优先级无关**）。`shouldYieldToHost` 属于机制②。让出和优先级在 Scheduler 层是解耦的：先让出（机制②），再重新 peek 堆顶决定下一个跑谁（机制①）。（Day23 追问）
+
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
 
