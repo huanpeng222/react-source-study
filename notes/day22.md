@@ -398,29 +398,38 @@ Context 的更新会导致所有消费该 Context 的组件重新渲染（除非
 
 ## 六、我之前以为…，其实是…（跟练后回填）
 
-（跟练完成后填写）
+1. **我以为** 一个最小可用的状态管理库，selector 细粒度订阅需要自己手写"只通知关心这个字段的人"这种判断逻辑。**其实**广播是无差别的（`listeners.forEach` 无条件通知所有订阅者），真正的细粒度判断完全外包给了 `useSyncExternalStore` 内置的 `Object.is` 比较——每个组件自己重新算一次 selector，值没变就被 React 自动挡住，不用手写。
+
+2. **我以为** 批量更新去重应该靠"维持一个定时器，定点执行更新"。**其实**该用 `queueMicrotask`——它不需要猜一个固定延迟时间，语义是"这一轮同步代码全部跑完之后立刻执行"，比 `setTimeout` 更精确也更快。（入场自测Q3纠错）
+
+3. **我以为** `subscribe` 返回取消订阅函数是为了"下一次通知需要重新绑定"。**其实**订阅是长期有效的登记，返回取消函数是为了配合 `useEffect` 的清理机制——组件卸载时 React 自动调用这个返回值，把自己从监听名单里摘掉，防止内存泄漏和"操作已卸载组件"的报错。
+
+4. **我以为** `useSyncExternalStore` 内部那行 `subscribeToStore.bind(null, fiber, inst, subscribe)` 是在"调用"函数。**其实** `.bind()` 只是打包一个"稍后才会被调用"的函数，跟箭头函数 `() => subscribe(callback)` 是完全等价的写法，`mountEffect` 才是真正决定"什么时候调用"的地方（渲染commit之后）。
+
+5. **我以为** `useSyncExternalStore` 修复渲染撕裂是"发现快照不一致就丢弃旧数据，强制重渲染"。**其实**没有任何数据被丢弃——`checkIfSnapshotChanged` 只是比较"渲染时读到的快照"和"commit后重新读到的快照"，不一致时用 `forceStoreRerender` 触发一次新渲染，让组件重新去读最新值，真实 state 一直在 store 里好好保管着。（验收清单自查纠错，认知纠正#79）
+
+6. **实战踩坑**：`setState` 实现里改完 `state` 后忘了调用 `notify()`，导致 store 内部数据确实正确更新了，但订阅者永远不知道数据变了，页面上的值不会跟着变化——数据层正确、通知层缺失是两件独立的事，任何一个环节漏了都会导致"看起来没生效"。
 
 ---
 
 ## 七、动手实验（demos/day22/）
 
-在真实的 Vite + React 项目里跑：
+已按真实 Vite + React 项目格式补建，详见 `demos/day22/README.md`：
 
 | 实验 | 验证什么 |
 |---|---|
 | M1 | 手写的 mini-store 是否真的支持 selector 细粒度订阅（一个组件只订阅 `count`，另一个组件改 `name`，前者不应该重渲染） |
 | M2 | 批量更新去重是否生效（同一事件里调用 3 次 `setState`，通过 `subscribe` 里打 log 验证只通知了 1 次，不是 3 次） |
-| M3 | 对比原生手写"forceUpdate"版本 vs `useSyncExternalStore` 版本，在并发渲染场景下是否有撕裂差异（可选，难度较高） |
 
 ---
 
 ## 八、验收清单
 
 - [x] 能说出为什么普通全局变量改了不会触发 React 重渲染
-- [x] 能讲清楚 `useSyncExternalStore` 解决的"渲染撕裂"问题，以及它怎么解决（commit后重新检查快照，用SyncLane强制纠正）
-- [ ] 能讲清楚"selector细粒度订阅"其实是 `useSyncExternalStore` 内置的 `Object.is` 比较，不是自己实现的
-- [x] 能讲清楚批量更新去重为什么用 `queueMicrotask`
-- [ ] 完成至少 2 个实验并记录到 observations.md
+- [x] 能讲清楚 `useSyncExternalStore` 解决的"渲染撕裂"问题，以及它怎么解决（commit后重新检查快照，触发新渲染让组件重新读最新值，不是丢弃数据）
+- [x] 能讲清楚"selector细粒度订阅"其实是 `useSyncExternalStore` 内置的 `Object.is` 比较，不是自己实现的
+- [x] 能讲清楚批量更新去重为什么用 `queueMicrotask`（不是让出主线程，是立刻执行不用猜延迟）
+- [x] 完成实验并记录到 observations.md
 
 ### 八点五、验收清单自查记录（2026-07-09）
 
