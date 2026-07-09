@@ -416,11 +416,31 @@ Context 的更新会导致所有消费该 Context 的组件重新渲染（除非
 
 ## 八、验收清单
 
-- [ ] 能说出为什么普通全局变量改了不会触发 React 重渲染
-- [ ] 能讲清楚 `useSyncExternalStore` 解决的"渲染撕裂"问题，以及它怎么解决（commit后重新检查快照，用SyncLane强制纠正）
+- [x] 能说出为什么普通全局变量改了不会触发 React 重渲染
+- [x] 能讲清楚 `useSyncExternalStore` 解决的"渲染撕裂"问题，以及它怎么解决（commit后重新检查快照，用SyncLane强制纠正）
 - [ ] 能讲清楚"selector细粒度订阅"其实是 `useSyncExternalStore` 内置的 `Object.is` 比较，不是自己实现的
-- [ ] 能讲清楚批量更新去重为什么用 `queueMicrotask`
+- [x] 能讲清楚批量更新去重为什么用 `queueMicrotask`
 - [ ] 完成至少 2 个实验并记录到 observations.md
+
+### 八点五、验收清单自查记录（2026-07-09）
+
+| 条目 | 学习者回答 | 判定 |
+|---|---|---|
+| 普通全局变量为什么不触发重渲染 | 正确，`useSyncExternalStore`是桥梁 | ✅ 对 |
+| 渲染撕裂怎么解决 | "如果不一致，则丢弃，直接强制重渲染" | 🟡 偏——"丢弃"说法不准确 |
+| 为什么用queueMicrotask | "可以让出主线程，比setTimeout没有损耗" | ❌ 反了——queueMicrotask恰恰不是"让出"，是"不让出、立刻执行" |
+
+**纠正1：渲染撕裂修复不是"丢弃数据"，是"发现快照不一致→强制重渲染让组件重新读最新值"**
+
+`checkIfSnapshotChanged` 做的是**比较**：对比"上次render时读到的快照"(`inst.value`)和"现在重新调`getSnapshot()`读到的快照"，用`Object.is`判断是否一致。如果不一致，**没有任何数据被丢弃**——真实state一直在store里好好保管着，只是"渲染时读到的值"过期了，`forceStoreRerender`触发一次新渲染让组件重新走一遍流程去读最新值。
+
+**纠正2：`queueMicrotask` 不是为了"让出主线程"，而是"不让出、立刻执行"**
+
+"让出主线程"这个说法用在Scheduler身上是对的（Day19的`shouldYield`，宏任务级别的让步，把控制权交还浏览器去做绘制/处理输入）。但`queueMicrotask`恰恰相反——微任务的执行时机是"当前这轮同步代码跑完，绘制/宏任务开始之前，立刻执行"，比`setTimeout`（宏任务）更快、更早，根本不涉及"让出"这个动作。
+
+用它的真正原因是：**保证这个tick里所有同步的setState调用完之后，立刻、准确地统一通知一次**——不需要猜一个固定延迟（setTimeout的问题），也不会被拖到"下一轮事件循环"才执行。
+
+> 一句话记忆：渲染撕裂修复 = 不丢弃数据，强制重渲染重新读；`queueMicrotask` = 不让出主线程，比setTimeout更快更精确。
 
 ---
 

@@ -294,5 +294,11 @@
 78. **我以为** `entangleTransitions` 解决的是"同一个 startTransition 回调里，多个不同 state 的 setState 保持一致（比如 setA+setB 一起提交）"。
     **其实** 那种场景靠的是更基础的机制——`requestTransitionLane` 内部有个全局缓存 `currentEventTransitionLane`，只在每次微任务边界才重置为 0，所以同一个事件回调里连续多次 setState 天然拿到**同一个** lane 号，压根不需要"捆绑"。`entangleTransitions`/`entangleTransitionUpdate` 真正管的是**同一个 state**（同一个 `useState`/`useReducer` 的 `queue`），被**两次独立的事件**（隔着一次事件循环，各自领到不同的 transition lane 编号）先后触发更新时，防止调度系统把这两次更新拆开处理导致顺序错乱——它操作的是单个 `queue.lanes`，不是整个 fiber 或多个不同的 state。（Day21 追问纠错，2026-07-08）
 
+79. **我以为** `useSyncExternalStore` 解决渲染撕裂是"发现快照不一致就丢弃旧数据，然后强制重渲染"。
+    **其实** `checkIfSnapshotChanged` 只是做**比较**（`Object.is(inst.value, nextValue)`），没有任何数据被丢弃——真实 state 一直好好保存在 store 里，只是"上次渲染时读到的快照"和"commit后重新读到的快照"不一致，说明渲染时读到的值已经过期了。`forceStoreRerender` 触发的是**一次新的渲染**，让组件重新走一遍流程去读最新值，不是"丢弃"这个动作。（Day22 验收清单自查纠错）
+
+80. **我以为** mini-store 批量更新去重用 `queueMicrotask` 是因为它"能让出主线程，比 `setTimeout` 没有损耗"。
+    **其实**方向反了——`queueMicrotask` 恰恰**不是**"让出"，是"当前这轮同步代码跑完、绘制/宏任务开始之前立刻执行"，比 `setTimeout`（宏任务）更快更早。"让出主线程"是 Scheduler 的 `shouldYield`（Day19）在做的事，那是把控制权交还浏览器；而 `queueMicrotask` 是"抢在下一次渲染前精确执行"，用它的真正原因是不用像 `setTimeout` 那样猜一个固定延迟时间，能在同一批同步 setState 跑完的那一刻立刻、准确地统一通知一次。（Day22 验收清单自查纠错）
+
 <!-- 后续 Day 的认知纠正继续追加在这里 -->
 
