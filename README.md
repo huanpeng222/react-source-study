@@ -32,6 +32,7 @@
 | 阶段A | D22 | 自研 mini-store（useSyncExternalStore/selector细粒度/批量更新去重） | ✅ |
 | 阶段A | D23 | 源码模块模拟面试（15题限时口述自检，Day1-22覆盖） | ✅ 完成（3对8偏4错，gap-list已归档） |
 | 阶段A | D24 | 源码知识体系图 + 面试话术卡（收尾并发渲染+状态管理模块） | ✅ |
+| 阶段B | D25 | AI Agent工作台：立项定向 + Next.js脚手架 + 首次Vercel部署（教程见 `agent-workbench/tutorials/`） | ✅ 教程就位，待跟练 |
 
 > ⚠️ **2026-07-03 核对发现**：D17、D18 是跨电脑接力时带偏的 **Next.js 框架专题**，不在 `meta/roadmap.md` 的原 8 周主线内。内容保留在仓库供参考，后续会单独开一轮 Next.js 学习，不再占用主线 DayN 编号。**主线已从 D19 起拉回 roadmap 缺口**：Scheduler（原 D12，已完成）→ useTransition/useDeferredValue（原 D14，已完成）→ 高优先级打断实战（原 D15）→ 自研 mini-store（原 D20）。
 

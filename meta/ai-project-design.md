@@ -74,7 +74,7 @@
 | 层 | 选型 | 为什么选它 / 对比替代方案 |
 |---|---|---|
 | 框架 | **Next.js 15 App Router** | 前后端一体，API 路由天然承载 LLM 调用（Key 不暴露给前端）；Server Components 减少客户端 JS；对比"纯 React + Express"省掉两套部署和跨域配置 |
-| AI 编排 | **Vercel AI SDK** | 内建流式（`streamText`）、Tool Calling（`tool()` + Zod schema）、多步循环（`maxSteps`），不用自己撸 SSE 解析；对比 LangChain.js 更轻、更适合前端项目、心智负担小 |
+| AI 编排 | **Vercel AI SDK v6+** | 内建流式（`streamText`）、Tool Calling（`tool()` + Zod schema）、多步循环（v6+ 用 `stopWhen: stepCountIs(n)`，不再是老版 `maxSteps`；也可用 `ToolLoopAgent` 抽象），不用自己撸 SSE 解析；对比 LangChain.js 更轻、更适合前端项目。⚠️版本变化：v6+ `system`→`instructions`、`toDataStreamResponse`→`toUIMessageStreamResponse`；v7 要求 Node22+ESM |
 | LLM | 一个真实 API（如 OpenAI 兼容接口 / 国内大模型） | 调 API 不训模型；抽象成 provider 层，方便加分项做"多模型切换" |
 | 状态管理 | Zustand（呼应 D15/D22 学的） | 轻量，Agent 执行状态（步骤列表/loading/错误）用它管，面试能顺带讲 useSyncExternalStore |
 | UI | Tailwind + 自定义轨迹组件 | 快速搭 + 可视化组件自己写（差异化在这里） |
