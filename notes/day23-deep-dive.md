@@ -483,6 +483,125 @@ commit 后重新读一次快照跟渲染时的比，**如果不一致，就用 S
 
 ---
 
+## 追问 A：Fiber 树的遍历用的是同一套算法吗？从上而下是 DFS 吗？哪些操作会遍历树？
+
+### 面试怎么问
+"React 里对 Fiber 树的遍历是一套算法吗？render 的遍历是深度优先吗？除了 render，还有哪些操作会遍历树？"
+
+### 先给结论
+- **主干遍历（render 阶段的 workLoop）是深度优先（DFS），而且是"可中断的手写 DFS"**——不用递归、不用栈数据结构，靠 fiber 节点上的 `child / sibling / return` 三个指针手动实现。
+- **但不是"所有遍历都用同一套"**——React 里存在**好几种不同目的的遍历**，它们共享"child/sibling/return 三指针 + DFS"这个大骨架，但**剪枝规则和触发时机各不相同**。
+
+### 一、为什么是"手写 DFS"而不是递归
+
+普通树的 DFS 一般写成递归（`traverse(child)`）。React 不能这么干——递归一旦开始就必须一口气跑到底，**没法在中间暂停**（Day21 讲的可打断渲染就废了）。所以 React 把递归拆成了"用指针的循环"：
+
+```js
+function performUnitOfWork(fiber) {
+  var next = beginWork(fiber);      // 处理当前节点，返回第一个子节点
+  if (next === null) {
+    completeUnitOfWork(fiber);       // 没有子节点了 → 回溯
+  } else {
+    workInProgress = next;           // 有子节点 → 下钻
+  }
+}
+```
+
+遍历顺序完全由三个指针驱动：
+```
+优先走 child（往下钻，深度优先）
+  → 没有 child 了，走 sibling（处理兄弟）
+    → 没有 sibling 了，走 return 回到父，再找父的 sibling
+```
+
+这就是标准 DFS 的"前序下钻 + 后序回溯"，只是用 `workInProgress` 这个全局指针一步步挪，**每挪一步都能停下来检查 `shouldYield()`**——这正是可中断的关键。
+
+### 二、下钻（beginWork）和回溯（completeWork）是 DFS 的两个方向
+
+同一趟 DFS，一个节点会被"经过两次"：
+- **下钻时**：调 `beginWork`（对应 DFS 的"前序访问"）——构建/diff 子节点、打自己的 flags。
+- **回溯时**：调 `completeWork`（对应 DFS 的"后序访问"）——创建 DOM、`bubbleProperties` 把子树的 subtreeFlags 冒泡上来。
+
+为什么 completeWork 必须在回溯（后序）做：因为它要"汇总所有子节点的信息"（subtreeFlags、DOM 挂载），必须等子节点全处理完才能做——这是后序遍历的天然用途。
+
+### 三、React 里到底有几种遍历（回答"哪些操作会遍历树"）
+
+| 遍历 | 时机 | 骨架 | 剪枝规则（关键区别） |
+|---|---|---|---|
+| **① render 主循环** | render 阶段 | child/sibling/return DFS，可中断 | 靠 `childLanes`：子树没有命中 renderLanes 的更新就 bailout 跳过 |
+| **② commit 三阶段遍历** | commit 阶段 | 同样 DFS，但**不可中断**（同步跑完） | 靠 `subtreeFlags`：子树 flags 为 0 就整棵跳过（O(log n) 剪枝） |
+| **③ propagateContextChanges** | Context value 变化时（在 beginWork 里） | DFS 遍历 Provider 子树 | 靠匹配 `dependencies.firstContext`：找到消费了该 context 的 fiber 就标 lanes；`forcePropagateEntireTree` 决定要不要继续深入 |
+| **④ 卸载时的 deletion 遍历** | commit mutation 阶段删除子树时 | DFS 深入被删子树 | 无剪枝——要跑完每个后代的 cleanup/componentWillUnmount/解绑 ref |
+
+**共性**：都用 `child/sibling/return` 三指针 + DFS 大骨架（React 里没有别的树形结构，就这一套指针）。
+**差异**：**剪枝依据不同**——render 看 childLanes，commit 看 subtreeFlags，context 看 dependencies 匹配，deletion 不剪枝。
+
+### 一句话面试版
+**"Fiber 树遍历统一是 child/sibling/return 三指针驱动的深度优先，render 阶段做成可中断的手写 DFS（不用递归以便随时 shouldYield 让出）。beginWork 是前序下钻、completeWork 是后序回溯。但'同一套骨架'下有多种遍历：render 靠 childLanes 剪枝、commit 靠 subtreeFlags 剪枝、Context 变化靠 dependencies 匹配遍历、卸载靠不剪枝的 deletion 遍历——骨架同，剪枝规则不同。"**
+
+---
+
+## 追问 B：React 什么时候 commit 一次？一次刷新会 commit 几次，能写代码前算准吗？
+
+### 面试怎么问
+"一次页面更新会触发几次 commit？能在写代码之前就确定 commit 次数吗？组件很复杂时呢？"
+
+### 先给最核心的结论
+**commit 次数不等于 setState 次数，也不能在写代码前"精确算出一个固定数字"——因为它取决于运行时这些更新被合并进了几个"批次（lane 批次）"，而合并规则依赖运行时上下文（是否在同一事件、优先级是否相同、是否被 Suspense/打断拆开）。但你可以按规则推出一个"大概率的次数"和"上界"。**
+
+### 一、什么叫"commit 一次"
+一次 commit = render 阶段跑出一棵完整的 wip 树（`RootCompleted`）→ `commitRoot` 把它一次性提交到真实 DOM。**一次 commit 对应"屏幕更新一帧的内容"**，不管这次 render 里改了 1 个组件还是 1000 个组件，都算**一次** commit。
+
+### 二、决定 commit 次数的是"批次"，不是 setState 次数
+
+关键机制是**自动批处理（Automatic Batching，React 18+）**：**同一个批次里的多次 setState，只会触发一次 render + 一次 commit。**
+
+```jsx
+function handleClick() {
+  setA(1);   // ┐
+  setB(2);   // ├─ 同一个事件回调里，同一优先级 → 合并成 1 个批次 → 1 次 commit
+  setC(3);   // ┘
+}
+```
+
+上面 3 次 setState → **1 次 commit**。这在写代码前就能确定，因为它们在同一个同步事件回调、同一优先级。
+
+### 三、什么情况会拆成多次 commit（这就是"算不准"的来源）
+
+| 场景 | commit 次数 | 为什么 |
+|---|---|---|
+| 同一事件里多次同优先级 setState | 1 次 | 自动批处理合并 |
+| `flushSync(() => setX())` 包裹 | 强制多一次 | flushSync 跳出批处理，立即同步 commit |
+| 不同优先级混合（如 SyncLane + TransitionLane） | ≥2 次 | 高优先级先单独 commit，低优先级后单独 commit（Day21 你实测过的现象） |
+| `startTransition` 里的更新 | 可能被打断→丢弃重来 | 被打断的那次**不 commit**（丢弃的 wip 不算 commit），最终成功的才算 |
+| Suspense 挂起 | ≥2 次 | 先 commit 一次 fallback，数据回来后再 commit 一次真实内容 |
+| useEffect 里再 setState | 多一轮 | effect 在 commit 后异步跑，里面 setState 会触发**新一轮** render+commit |
+| useLayoutEffect 里 setState | 多一次同步 commit | layout effect 在 paint 前同步跑，其 setState 会在 paint 前强制再 render+commit 一次 |
+
+### 四、所以"能不能写代码前算准"——分情况
+
+- **能确定的部分**：同一事件、同一优先级的 N 次 setState = 1 次 commit。这是可预测的。
+- **算不准的部分**：一旦涉及**不同优先级、Suspense、被打断、effect 里再触发更新**，commit 次数取决于运行时（网络何时返回、有没有更高优先级插队、effect 链条多深），**无法在写代码前给出一个精确固定值**。
+- **能给的是"上界估计"**：把"每个独立优先级批次 + 每个 Suspense 边界的 fallback/内容切换 + 每个会 setState 的 effect 轮次"加起来，是次数的上界。
+
+### 五、组件复杂时，变的是"每次 commit 的耗时"，不是"commit 次数"
+
+这是最容易搞反的点，必须讲清楚：
+- **组件复杂/树很大 → 影响的是单次 render 的耗时**（要遍历、diff、completeWork 的节点多），以及单次 commit 的 DOM 操作量。
+- **commit 的"次数"只由"批次怎么切"决定，跟组件多复杂无关**——1000 个组件的树,一次 setState 同样只 commit 一次(只是这一次更慢)。
+
+换句话说:**复杂度决定"每次多慢",批次决定"commit 几次",两者正交。** 优化时也要分开:减次数靠合并批次/useTransition;减单次耗时靠 memo/虚拟列表/代码分割。
+
+### 六、怎么实测验证（呼应 Day21 I2 的 Console 方案）
+想知道真实 commit 次数,别数 setState,用 `useEffect(() => { console.log('commit', ++count, Date.now()) })`（effect 在每次 commit 后跑）或 React DevTools Profiler 的 commit 条形图,直接数真实提交了几次。
+
+### 一句话面试版
+**"commit 次数由'更新被合并进几个 lane 批次'决定,不等于 setState 次数——同一事件同优先级的多次 setState 自动批处理成 1 次 commit。能写代码前确定的只有这种同批次场景;一旦涉及不同优先级、Suspense、被打断、effect 里再 setState,次数取决于运行时,只能估上界。组件复杂度影响的是'单次 commit 多慢',不影响'commit 几次'——次数和耗时是正交的两件事。"**
+
+---
+
 ## 收尾：这批题的共性
 
 四道 ❌ 里，Q3/Q8/Q13 都是**把两个相邻概念的边界搞混了**（render vs commit / 父子lanes vs 批次lanes / 排序机制 vs 时间片机制）。Q15 是**已纠正过又回退**。面试时这类"边界模糊"最容易被追问戳穿，所以每题的"面试记忆点"都特意用一句话把边界钉死——背记忆点比背长篇更实用。
+
+追问 A/B 补充的两个高频概念：**遍历（一套骨架、多种剪枝）** 和 **commit 次数（批次决定次数、复杂度决定耗时，两者正交）**——后者的"次数 vs 耗时正交"是面试高频陷阱，务必分清。
