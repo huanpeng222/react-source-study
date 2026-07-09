@@ -106,13 +106,13 @@ const DeepChild = memo(function DeepChild({ tag }) {
 |---|---|---|
 | 改 toggle（value 不变） | **0 行**（都不渲染）| props 没变 + value 没变 → bailout 成功 |
 | 改 inner（内层 value 变） | **只 B(内层) 1 行** | propagateContextChanges 只标记内层 B 的 lanes，穿透其 memo；A/C 不在内层 Provider 子树，bailout 成功 |
-| 改 outer（外层 value 变） | **A/B/C 3 行** | 三个都在外层 Provider 子树且都消费 Ctx → 都被标记 lanes → 都穿透 memo |
+| 改 outer（外层 value 变） | **A/C 2 行** | A/C 消费外层 Ctx → 被标记 lanes → 穿透 memo；B 在内层 Provider 里，内层 value 没变 → B 不被标记 → memo bailout 成功 |
 
 ⭐ **核心结论**：
 - **propagateContextChanges 精准标记消费者**的价值，只有在 memo 挡住"默认全渲染"后才显现
 - **改 toggle 0 行**证明：context value 不变时，propagateContextChanges 根本不触发
 - **改 inner 只 1 行**证明：只有"该 Provider 子树内 + 消费了该 context"的 fiber 被标记
-- **改 outer 3 行**证明：外层 Provider 子树覆盖全部三个，DFS 穿透嵌套 Provider 也能标记到内层 B
+- **改 outer 2 行**证明：只有消费外层 Ctx 的 A/C 被标记。B 虽然在外层 Provider 子树内，但内层 Provider 遮蔽了外层 value——B 读到的是内层 value（没变），不会被标记
 
 ---
 
